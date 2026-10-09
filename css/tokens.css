@@ -1,0 +1,289 @@
+/* ==========================================================================
+   TradeLab design tokens
+   --------------------------------------------------------------------------
+   Layout concept: an instrument panel. A fixed navigation rail, a slim header
+   and a 12-column work surface where panels are separated by hairlines rather
+   than floating as cards.
+
+   Principles
+   1. Color means money. Green and red are reserved for price movement and
+      profit/loss, and always travel with a sign and an arrow. Everything else
+      is graphite and ink.
+   2. Simulation is always visible. The hatched "paper money" mark labels every
+      group of virtual figures.
+   3. Numbers first. Archivo's width axis does the work: wide for names and
+      titles, regular for reading, slightly narrow for dense figures.
+
+   The palette is dark-first: bare :root holds the dark values. Light values
+   apply when the OS prefers light and the user chose "System", or when the
+   user picks Light in Settings (data-theme="light").
+   ========================================================================== */
+
+@font-face {
+  font-family: 'Archivo';
+  src: url('../assets/fonts/archivo-latin-variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Archivo';
+  src: url('../assets/fonts/archivo-latin-ext-variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
+    U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces: charcoal with a faint cool bias */
+  --ground: #131518;
+  --panel: #191c20;
+  --raised: #20242a;
+  --sunken: #0f1114;
+  --line: #272b31;
+  --line-strong: #363b43;
+  --control-line: #626974;
+
+  /* Ink */
+  --fg: #e8eaed;
+  --fg-2: #a3aab4;
+  --fg-3: #858d98;
+  --ink: #e8eaed;
+  --ink-hover: #cdd1d7;
+  --on-ink: #131518;
+  --on-bad: #131518;
+  --hover-wash: rgb(232 234 237 / 0.06);
+  --active-wash: rgb(232 234 237 / 0.1);
+
+  /* Money: price movement and profit/loss only */
+  --up: #3fbf86;
+  --down: #ef6b6b;
+  --up-wash: rgb(63 191 134 / 0.12);
+  --down-wash: rgb(239 107 107 / 0.12);
+
+  /* Status (never used for series identity) */
+  --warn: #e3b04b;
+  --warn-wash: rgb(227 176 75 / 0.12);
+  --good: #3fbf86;
+  --bad: #ef6b6b;
+
+  /* The "paper money" hatch that marks simulated values */
+  --hatch: #4a515b;
+
+  /* Charts */
+  --chart-grid: #24282e;
+  --chart-axis: #858d98;
+  --chart-series: #c9ced5;
+  --chart-muted: #4a515b;
+
+  /* Overlays */
+  --scrim: rgb(6 7 9 / 0.62);
+  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.42);
+  --focus: #e8eaed;
+
+  /* Type */
+  --font: 'Archivo', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --fs-12: 0.75rem;
+  --fs-13: 0.8125rem;
+  --fs-14: 0.875rem;
+  --fs-15: 0.9375rem;
+  --fs-16: 1rem;
+  --fs-18: 1.125rem;
+  --fs-20: 1.25rem;
+  --fs-24: 1.5rem;
+  --fs-28: 1.75rem;
+  --fs-36: 2.25rem;
+  --lh-tight: 1.2;
+  --lh: 1.5;
+  --lh-prose: 1.65;
+  --wide: 112%;
+  --narrow: 96%;
+  --w-regular: 400;
+  --w-medium: 500;
+  --w-semibold: 600;
+  --w-bold: 700;
+
+  /* Space (4px base) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* Density-dependent (see [data-density]) */
+  --gap: 16px;
+  --pad: 16px;
+  --row-h: 44px;
+  --control-h: 36px;
+
+  /* Shape */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-pill: 999px;
+
+  /* Layout */
+  --sidebar-w: 232px;
+  --sidebar-w-collapsed: 64px;
+  --header-h: 56px;
+  --content-max: 1480px;
+  --gutter: 24px;
+  --prose-max: 68ch;
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* Layers */
+  --z-header: 20;
+  --z-sidebar: 30;
+  --z-scrim: 40;
+  --z-drawer: 45;
+  --z-popover: 50;
+  --z-toast: 60;
+}
+
+/* ---------- Light theme ---------- */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+    --ground: #f2f3f5;
+    --panel: #ffffff;
+    --raised: #f6f7f9;
+    --sunken: #eceef1;
+    --line: #e0e3e8;
+    --line-strong: #c9ced6;
+    --control-line: #7f8793;
+    --fg: #14171b;
+    --fg-2: #4b535e;
+    --fg-3: #626a76;
+    --ink: #14171b;
+    --ink-hover: #2c323a;
+    --on-ink: #ffffff;
+    --on-bad: #ffffff;
+    --hover-wash: rgb(20 23 27 / 0.05);
+    --active-wash: rgb(20 23 27 / 0.09);
+    --up: #0c7650;
+    --down: #c0313a;
+    --up-wash: rgb(12 118 80 / 0.1);
+    --down-wash: rgb(192 49 58 / 0.1);
+    --warn: #8f6200;
+    --warn-wash: rgb(143 98 0 / 0.1);
+    --good: #0c7650;
+    --bad: #c0313a;
+    --hatch: #b4bbc5;
+    --chart-grid: #e6e8ec;
+    --chart-axis: #626a76;
+    --chart-series: #3b424c;
+    --chart-muted: #c3c9d1;
+    --scrim: rgb(20 23 27 / 0.42);
+    --shadow-pop: 0 12px 32px rgb(20 23 27 / 0.16);
+    --focus: #14171b;
+  }
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --ground: #f2f3f5;
+  --panel: #ffffff;
+  --raised: #f6f7f9;
+  --sunken: #eceef1;
+  --line: #e0e3e8;
+  --line-strong: #c9ced6;
+  --control-line: #7f8793;
+  --fg: #14171b;
+  --fg-2: #4b535e;
+  --fg-3: #626a76;
+  --ink: #14171b;
+  --ink-hover: #2c323a;
+  --on-ink: #ffffff;
+  --on-bad: #ffffff;
+  --hover-wash: rgb(20 23 27 / 0.05);
+  --active-wash: rgb(20 23 27 / 0.09);
+  --up: #0c7650;
+  --down: #c0313a;
+  --up-wash: rgb(12 118 80 / 0.1);
+  --down-wash: rgb(192 49 58 / 0.1);
+  --warn: #8f6200;
+  --warn-wash: rgb(143 98 0 / 0.1);
+  --good: #0c7650;
+  --bad: #c0313a;
+  --hatch: #b4bbc5;
+  --chart-grid: #e6e8ec;
+  --chart-axis: #626a76;
+  --chart-series: #3b424c;
+  --chart-muted: #c3c9d1;
+  --scrim: rgb(20 23 27 / 0.42);
+  --shadow-pop: 0 12px 32px rgb(20 23 27 / 0.16);
+  --focus: #14171b;
+}
+
+/* ---------- Movement palette: blue/orange (color-vision friendly) ---------- */
+:root[data-movement='blue-orange'] {
+  --up: #5aa4f0;
+  --down: #f09a4a;
+  --up-wash: rgb(90 164 240 / 0.12);
+  --down-wash: rgb(240 154 74 / 0.12);
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-movement='blue-orange']:not([data-theme='dark']) {
+    --up: #1d68b9;
+    --down: #a24f05;
+    --up-wash: rgb(29 104 185 / 0.1);
+    --down-wash: rgb(162 79 5 / 0.1);
+  }
+}
+
+:root[data-movement='blue-orange'][data-theme='light'] {
+  --up: #1d68b9;
+  --down: #a24f05;
+  --up-wash: rgb(29 104 185 / 0.1);
+  --down-wash: rgb(162 79 5 / 0.1);
+}
+
+/* ---------- Density ---------- */
+:root[data-density='compact'] {
+  --gap: 12px;
+  --pad: 12px;
+  --row-h: 36px;
+  --control-h: 32px;
+}
+
+/* Larger targets for touch screens, whatever the density setting */
+@media (pointer: coarse) {
+  :root,
+  :root[data-density='compact'] {
+    --control-h: 44px;
+    --row-h: 48px;
+  }
+}
+
+/* ---------- Motion ---------- */
+:root[data-motion='reduce'] {
+  --dur-fast: 0ms;
+  --dur: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+  }
+}

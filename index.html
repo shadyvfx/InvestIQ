@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>TradeLab</title>
+    <meta name="description" content="Learn how the stock market works with interactive lessons, paper trading with virtual money, a trading journal and a tutor. All prices are simulated." />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#131518" />
+    <link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="assets/fonts/archivo-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+
+    <link rel="stylesheet" href="css/tokens.css" />
+    <link rel="stylesheet" href="css/base.css" />
+    <link rel="stylesheet" href="css/layout.css" />
+    <link rel="stylesheet" href="css/components.css" />
+    <link rel="stylesheet" href="css/pages.css" />
+    <link rel="stylesheet" href="css/responsive.css" />
+
+    <script>
+      // Apply saved display preferences before the first paint to avoid a
+      // flash of the wrong theme. Key must match config.storageKey.
+      (function () {
+        var root = document.documentElement;
+        try {
+          var saved = JSON.parse(window.localStorage.getItem('tradelab:v1') || 'null');
+          var prefs = (saved && saved.state && saved.state.preferences) || {};
+          if (prefs.theme === 'system') root.removeAttribute('data-theme');
+          else if (prefs.theme === 'light') root.setAttribute('data-theme', 'light');
+          if (prefs.movement === 'blue-orange') root.setAttribute('data-movement', 'blue-orange');
+          if (prefs.density === 'compact') root.setAttribute('data-density', 'compact');
+          if (prefs.motion === 'reduce') root.setAttribute('data-motion', 'reduce');
+        } catch (error) {
+          // Storage can be unavailable; the defaults (dark theme) apply.
+        }
+      })();
+    </script>
+
+    <script src="assets/vendor/chart.umd.min.js" defer></script>
+    <script type="module" src="js/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <div id="app">
+      <div class="boot" role="status">
+        <svg class="brand-mark" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <rect x="1" y="1" width="26" height="26" rx="6" stroke="currentColor" stroke-width="1.6" />
+          <path d="M10 6.5v3.5M10 19v2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          <rect x="7.6" y="10" width="4.8" height="9" rx="1" stroke="currentColor" stroke-width="1.6" />
+          <path d="M18 8v4M18 18.5v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          <rect x="15.6" y="12" width="4.8" height="6.5" rx="1" fill="currentColor" />
+        </svg>
+        <p>Loading TradeLab…</p>
+      </div>
+    </div>
+
+    <noscript>
+      <div class="boot"><p class="boot__error">TradeLab needs JavaScript to run. Enable it and reload the page.</p></div>
+    </noscript>
+
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <div id="live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>
