@@ -13,6 +13,7 @@ import { toast, announce } from '../components/notifications.js';
 import { resetAccount } from '../services/tradingService.js';
 import { refreshQuotes, RANGES } from '../services/marketDataService.js';
 import { loadAppData } from '../services/session.js';
+import { accountLabel } from '../services/accountService.js';
 import { DIFFICULTY_LEVELS, DIFFICULTY_LABELS } from '../core/progress.js';
 
 const ui = { startingCash: null };
@@ -37,7 +38,52 @@ const DIFFICULTY_HINTS = {
   advanced: 'Every lesson can be suggested, and tutor answers include the extra detail.',
 };
 
-function dataLocationHint(bytes) {
+/** The signed-in account while the app runs on mock data (its progress then saves to the account). */
+function savingAccount(state) {
+  return isMock() && state.runtime.userStatus === 'signed-in' ? state.runtime.user : null;
+}
+
+/** What "Clear data" does for whoever is using TradeLab right now. */
+function clearCopy(state) {
+  const user = savingAccount(state);
+  if (user) {
+    return {
+      section: 'Your data',
+      label: 'Start your account over',
+      hint: `Erases the simulated account, lesson progress, journal, tutor conversation, notifications and preferences saved to ${accountLabel(user)}, and starts again with the example account. Your sign-in stays.`,
+      button: 'Start over',
+      title: 'Start your account over?',
+      message: `This erases everything saved to ${accountLabel(user)}: the simulated account, lesson progress, journal entries, the tutor conversation, notifications and preferences. It cannot be undone.`,
+      done: ['Your account started over', 'TradeLab has started fresh with the example account.'],
+    };
+  }
+  if (isMock()) {
+    return {
+      section: 'Local demo data',
+      label: 'Clear all local demo data',
+      hint: "Erases the guest progress TradeLab stored in this browser: the simulated account, lesson progress, journal, tutor conversation, notifications and preferences. TradeLab then starts fresh with the example account. Progress saved to accounts isn't affected.",
+      button: 'Clear all data',
+      title: 'Clear all local demo data?',
+      message: "This erases the simulated account, lesson progress, journal entries, the tutor conversation, notifications and preferences from this browser. It cannot be undone. Progress saved to accounts isn't affected.",
+      done: ['Local data cleared', 'TradeLab has started fresh with the example account.'],
+    };
+  }
+  return {
+    section: 'Data in this browser',
+    label: 'Clear data in this browser',
+    hint: 'Erases the preferences, tutor conversation and notifications stored here, then reloads your account, lessons and journal from the server. Nothing on the server is deleted.',
+    button: 'Clear browser data',
+    title: 'Clear data in this browser?',
+    message: 'This erases your preferences, the tutor conversation and notifications from this browser. Your account, lessons and journal stay on the server.',
+    done: ['Browser data cleared', 'Your account, lessons and journal were reloaded from the server.'],
+  };
+}
+
+function dataLocationHint(bytes, state) {
+  const user = savingAccount(state);
+  if (user) {
+    return `Your simulated account, lesson progress, journal, tutor conversation and preferences are saved to your TradeLab account (${accountLabel(user)}) in the user database, so they come back whenever you sign in. When you're signed out, this browser shows a separate guest copy.`;
+  }
   const size = `about ${Math.max(1, Math.round(bytes / 1024))} KB`;
   if (!storageAvailable()) {
     return isMock()
@@ -45,8 +91,15 @@ function dataLocationHint(bytes) {
       : 'Your account, lessons and journal are saved on the TradeLab server. This browser is blocking local storage, so preferences and the tutor conversation reset when you close the tab.';
   }
   return isMock()
-    ? `Progress, journal entries, the tutor conversation and preferences are kept in this browser's local storage (${size}). It is a prototype convenience, not a secure or permanent database, and nothing is sent to a server.`
+    ? `You're not signed in, so progress, journal entries, the tutor conversation and preferences are kept in this browser's local storage (${size}) as guest data. That's a prototype convenience, not a secure or permanent store. Sign in to save progress to your account instead.`
     : `Your simulated account, lesson progress and journal are saved on the TradeLab server (${config.apiBaseUrl}). This browser keeps your preferences, the tutor conversation and notifications (${size}).`;
+}
+
+function accountSummary(state) {
+  const { user, userStatus } = state.runtime;
+  if (userStatus === 'signed-in' && user) return html`Signed in as ${accountLabel(user)}. <a class="link" href="#/account">Manage</a>`;
+  if (userStatus === 'unavailable') return html`Account server not running. <a class="link" href="#/account">How to start it</a>`;
+  return html`Not signed in. <a class="link" href="#/account">Sign up or sign in</a>`;
 }
 
 function page(state) {
@@ -175,23 +228,21 @@ function page(state) {
     </section>
 
     <section class="panel" aria-labelledby="set-data">
-      <div class="panel__head"><h2 class="panel__title" id="set-data">${isMock() ? 'Local demo data' : 'Data in this browser'}</h2></div>
+      <div class="panel__head"><h2 class="panel__title" id="set-data">${clearCopy(state).section}</h2></div>
       <div class="panel__body settings__rows">
         <div class="setting-row">
           <div class="setting-row__text">
             <p class="setting-row__label">Where your data lives</p>
-            <p class="setting-row__hint">${dataLocationHint(bytes)}</p>
+            <p class="setting-row__hint">${dataLocationHint(bytes, state)}</p>
           </div>
         </div>
         <div class="setting-row">
           <div class="setting-row__text">
-            <p class="setting-row__label">${isMock() ? 'Clear all local demo data' : 'Clear data in this browser'}</p>
-            <p class="setting-row__hint">${isMock()
-              ? 'Erases everything TradeLab stored here: the simulated account, lesson progress, journal, tutor conversation, notifications and preferences. TradeLab then starts fresh with the example account.'
-              : 'Erases the preferences, tutor conversation and notifications stored here, then reloads your account, lessons and journal from the server. Nothing on the server is deleted.'}</p>
+            <p class="setting-row__label">${clearCopy(state).label}</p>
+            <p class="setting-row__hint">${clearCopy(state).hint}</p>
           </div>
           <div class="setting-row__control">
-            <button type="button" class="btn btn--danger" id="clear-data-btn" data-action="clear-data">${icon('trash')}${isMock() ? 'Clear all data' : 'Clear browser data'}</button>
+            <button type="button" class="btn btn--danger" id="clear-data-btn" data-action="clear-data">${icon('trash')}${clearCopy(state).button}</button>
           </div>
         </div>
       </div>
@@ -205,7 +256,7 @@ function page(state) {
           <div class="kv__row"><dt class="kv__key">Data source</dt><dd class="kv__val">${isMock() ? 'Local mock data (no server)' : `Backend at ${config.apiBaseUrl}`}</dd></div>
           <div class="kv__row"><dt class="kv__key">Market prices</dt><dd class="kv__val">Simulated, fictional companies</dd></div>
           <div class="kv__row"><dt class="kv__key">Tutor</dt><dd class="kv__val">${isMock() ? 'Preview mode, prewritten answers' : 'Backend language model'}</dd></div>
-          <div class="kv__row"><dt class="kv__key">Account</dt><dd class="kv__val">No sign-in. A local demo profile.</dd></div>
+          <div class="kv__row"><dt class="kv__key">Account</dt><dd class="kv__val">${accountSummary(state)}</dd></div>
         </dl>
       </div>
     </section>
@@ -284,32 +335,15 @@ export default {
 
     disposer.add(
       on(root, 'click', '[data-action="clear-data"]', async (_event, button) => {
-        const confirmed = await confirmDialog(
-          isMock()
-            ? {
-                title: 'Clear all local demo data?',
-                message: 'This erases the simulated account, lesson progress, journal entries, the tutor conversation, notifications and preferences from this browser. It cannot be undone.',
-                confirmLabel: 'Clear all data',
-                danger: true,
-              }
-            : {
-                title: 'Clear data in this browser?',
-                message: 'This erases your preferences, the tutor conversation and notifications from this browser. Your account, lessons and journal stay on the server.',
-                confirmLabel: 'Clear browser data',
-                danger: true,
-              },
-        );
+        const copy = clearCopy(getState());
+        const confirmed = await confirmDialog({ title: copy.title, message: copy.message, confirmLabel: copy.button, danger: true });
         if (!confirmed) return;
         button.disabled = true;
         clearAllData();
         try {
-          if (isMock()) {
-            await refreshQuotes();
-            toast({ title: 'Local data cleared', body: 'TradeLab has started fresh with the example account.', tone: 'success' });
-          } else {
-            await loadAppData();
-            toast({ title: 'Browser data cleared', body: 'Your account, lessons and journal were reloaded from the server.', tone: 'success' });
-          }
+          if (isMock()) await refreshQuotes();
+          else await loadAppData();
+          toast({ title: copy.done[0], body: copy.done[1], tone: 'success' });
         } catch (error) {
           toast({ title: 'Data was cleared, but reloading failed', body: `${error.message} Reload the page to try again.`, tone: 'error' });
         }
@@ -320,6 +354,7 @@ export default {
     disposer.add(watch((state) => state.preferences, paint));
     disposer.add(watch((state) => state.account, paint));
     disposer.add(watch((state) => state.market, paint));
+    disposer.add(watch((state) => `${state.runtime.userStatus}:${state.runtime.user?.id ?? ''}`, paint));
 
     return () => disposer.dispose();
   },

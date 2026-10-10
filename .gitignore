@@ -1,0 +1,10 @@
+# The user database holds emails and password hashes: keep it out of git.
+tradelab.db
+tradelab.db-journal
+tradelab.db-wal
+tradelab.db-shm
+
+__pycache__/
+*.pyc
+.DS_Store
+node_modules/

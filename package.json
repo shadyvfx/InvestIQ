@@ -2,12 +2,14 @@
   "name": "tradelab-frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "TradeLab frontend prototype: stock-market lessons and paper trading with simulated data.",
+  "description": "TradeLab: stock-market lessons and paper trading with simulated data, plus a local account server (Python, SQLite).",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
     "start": "node scripts/dev-server.mjs",
-    "test": "node --test tests/core.test.mjs"
+    "server": "python3 scripts/dev_server.py",
+    "test": "node --test tests/core.test.mjs",
+    "test:server": "python3 -m unittest discover -s tests -v"
   },
   "engines": {
     "node": ">=18"

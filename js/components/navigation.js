@@ -1,6 +1,6 @@
 // Application shell: sidebar navigation (a drawer on small screens), the
-// header with page title, search, simulation notice, notifications and the
-// profile menu.
+// header with page title, search, simulation notice, notifications, the
+// Sign up button and the account menu.
 
 import { html, render, $, on } from '../utils/dom.js';
 import { getState, updateSlice, watch } from '../state.js';
@@ -8,9 +8,10 @@ import { ROUTES } from '../router.js';
 import { formatDate, relativeTime } from '../utils/format.js';
 import { icon, logoMark } from './icons.js';
 import { openCommandPalette } from './commandPalette.js';
-import { markAllRead, clearNotifications, unreadCount } from './notifications.js';
+import { markAllRead, clearNotifications, unreadCount, toast } from './notifications.js';
 import { openDialog } from './modals.js';
 import { MARKET_SOURCE, dateOfDay } from '../services/marketDataService.js';
+import { signOut, accountLabel, accountInitials } from '../services/accountService.js';
 
 const mobileQuery = window.matchMedia('(max-width: 899px)');
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
@@ -60,9 +61,10 @@ function shellMarkup() {
             </button>
             <div class="popover" id="bell-popover" role="dialog" aria-label="Notifications" hidden></div>
           </div>
+          <a class="btn btn--primary btn--sm topbar__signup" id="signup-link" href="#/account" hidden>Sign up</a>
           <div class="pop-anchor">
-            <button type="button" class="icon-btn" id="profile-trigger" aria-expanded="false" aria-controls="profile-popover" aria-label="Profile and settings">
-              <span class="avatar" aria-hidden="true">DL</span>
+            <button type="button" class="icon-btn" id="profile-trigger" aria-expanded="false" aria-controls="profile-popover" aria-label="Account menu">
+              <span class="avatar" id="profile-avatar" aria-hidden="true">${icon('user')}</span>
             </button>
             <div class="popover popover--menu" id="profile-popover" hidden></div>
           </div>
@@ -150,14 +152,29 @@ function bellContent() {
     </div>`;
 }
 
+function signedInUser() {
+  const { user, userStatus } = getState().runtime;
+  return userStatus === 'signed-in' && user ? user : null;
+}
+
 function profileContent() {
+  const user = signedInUser();
+  const unavailable = getState().runtime.userStatus === 'unavailable';
   return html`<div class="popover__head">
-      <div><p class="popover__title">Demo learner</p><p class="tiny faint">Local profile. Data stays in this browser.</p></div>
+      ${user
+        ? html`<div class="popover__who"><p class="popover__title">${accountLabel(user)}</p><p class="tiny faint">${user.email}</p></div>`
+        : html`<div><p class="popover__title">Not signed in</p><p class="tiny faint">${unavailable ? "Accounts need the TradeLab server, which isn't running." : 'Create an account to sign in with a username.'}</p></div>`}
     </div>
     <ul class="menu">
+      ${user
+        ? html`<li><a class="menu__item" href="#/account">${icon('user')}Your account</a></li>`
+        : html`<li><a class="menu__item" href="#/account">${icon('user')}Create account</a></li>
+            <li><a class="menu__item" href="#/account?mode=signin">${icon('key')}Sign in</a></li>`}
+      <li class="menu__sep" role="separator"></li>
       <li><a class="menu__item" href="#/settings">${icon('settings')}Settings</a></li>
       <li><a class="menu__item" href="#/learn">${icon('learn')}Learning progress</a></li>
       <li><button type="button" class="menu__item" data-shell="shortcuts">${icon('keyboard')}Keyboard shortcuts</button></li>
+      ${user ? html`<li class="menu__sep" role="separator"></li><li><button type="button" class="menu__item" data-shell="sign-out">${icon('logout')}Sign out</button></li>` : ''}
     </ul>`;
 }
 
@@ -286,10 +303,31 @@ export function mountShell(root, { navigate, onCommand }) {
   const profileTrigger = $('#profile-trigger', root);
   const profilePanel = $('#profile-popover', root);
   profileTrigger.addEventListener('click', () => popovers.toggle(profileTrigger, profilePanel, (panel) => render(panel, profileContent())));
-  on(profilePanel, 'click', 'a, button', (event, element) => {
-    popovers.close();
-    if (element.dataset.shell === 'shortcuts') showShortcuts();
+  on(profilePanel, 'click', 'a, button', async (event, element) => {
+    const action = element.dataset.shell;
+    popovers.close({ restoreFocus: action === 'sign-out' });
+    if (action === 'shortcuts') showShortcuts();
+    if (action === 'sign-out') {
+      try {
+        await signOut();
+        toast({ title: 'Signed out', body: 'You signed out of TradeLab on this browser.', tone: 'info' });
+      } catch (error) {
+        toast({ title: "Couldn't sign out", body: error.message, tone: 'error' });
+      }
+    }
   });
+
+  // Account: initials when signed in, a Sign up button when not.
+  const signupLink = $('#signup-link', root);
+  const paintAccount = () => {
+    const user = signedInUser();
+    render($('#profile-avatar', root), user ? accountInitials(user) : icon('user'));
+    profileTrigger.setAttribute('aria-label', user ? `Account menu, signed in as ${accountLabel(user)}` : 'Account menu, not signed in');
+    signupLink.hidden = Boolean(user) || getState().runtime.userStatus === 'checking';
+    if (!profilePanel.hidden) render(profilePanel, profileContent());
+  };
+  watch((state) => `${state.runtime.userStatus}:${state.runtime.user?.id ?? ''}`, paintAccount);
+  paintAccount();
 
   const badge = $('#bell-count', root);
   const paintBadge = () => {

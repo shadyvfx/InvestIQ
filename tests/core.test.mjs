@@ -13,6 +13,11 @@ import { quoteAt, historyAt, closeAt, INSTRUMENTS } from '../js/data/mockMarketD
 import { LESSONS } from '../js/data/mockLessons.js';
 import { matchTopic } from '../js/data/mockTutorResponses.js';
 import { markdownToHTML } from '../js/utils/markdown.js';
+import { validateRegistration, validateSignIn, passwordChecks } from '../js/core/accounts.js';
+import { initStore, getState, updateSlice, persistNow, switchOwner, getOwner, personalSnapshot, readGuestData, resetGuestData } from '../js/state.js';
+import { readFileSync } from 'node:fs';
+
+const ACCOUNT_CASES = JSON.parse(readFileSync(new URL('./account-cases.json', import.meta.url), 'utf8'));
 
 const tx = (id, symbol, side, quantity, price, day) => ({ id, symbol, side, quantity, price, day, timestamp: day * 1000 + Number(id.slice(1)) });
 
@@ -194,4 +199,65 @@ test('markdown renderer escapes HTML and only links inside the app', () => {
   assert.equal(markdownToHTML('**Risk** is *not* `optional`'), '<p><strong>Risk</strong> is <em>not</em> <code>optional</code></p>');
   assert.equal(markdownToHTML('2 * 3 * 4'), '<p>2 * 3 * 4</p>');
   assert.equal(markdownToHTML('## Summary\n- one\n- two'), '<h3>Summary</h3><ul><li>one</li><li>two</li></ul>');
+});
+
+test('sign-up rules match the shared cases (the server checks the same file)', () => {
+  for (const testCase of ACCOUNT_CASES.registration) {
+    const result = validateRegistration(testCase.input);
+    assert.deepEqual(result.errors, testCase.errors, testCase.name);
+    assert.equal(result.ok, Object.keys(testCase.errors).length === 0, testCase.name);
+    if (testCase.value) {
+      assert.equal(result.value.username, testCase.value.username, testCase.name);
+      assert.equal(result.value.email, testCase.value.email, testCase.name);
+    }
+  }
+  for (const testCase of ACCOUNT_CASES.signIn) {
+    const result = validateSignIn(testCase.input);
+    assert.deepEqual(result.errors, testCase.errors, testCase.name);
+    if (testCase.value) assert.equal(result.value.login, testCase.value.login, testCase.name);
+  }
+});
+
+test('password checklist reports each requirement', () => {
+  const met = (password) => Object.fromEntries(passwordChecks(password).map((check) => [check.id, check.met]));
+  assert.deepEqual(met(''), { length: false, capital: false, special: false });
+  assert.deepEqual(met('abcdefgh'), { length: true, capital: false, special: false });
+  assert.deepEqual(met('Abcdefgh'), { length: true, capital: true, special: false });
+  assert.deepEqual(met('Abcdefg!'), { length: true, capital: true, special: true });
+  assert.deepEqual(met('A b'), { length: false, capital: true, special: false });
+});
+
+test('signed-in and guest progress never mix', () => {
+  initStore(); // the guest, in this test's in-memory storage
+  updateSlice('learning', () => ({ lessons: { 'what-is-a-stock': { completedAt: 1 } } }));
+  persistNow();
+
+  const saves = [];
+  const saved = { schemaVersion: 1, state: { learning: { lessons: { 'how-prices-move': { completedAt: 2 } } } } };
+  switchOwner({ kind: 'user', id: 7 }, { data: saved, save: (snapshot) => saves.push(snapshot) });
+  assert.deepEqual(getOwner(), { kind: 'user', id: 7 });
+  assert.deepEqual(Object.keys(getState().learning.lessons), ['how-prices-move']); // the account's progress only
+
+  updateSlice('learning', (learning) => ({ lessons: { ...learning.lessons, 'rsi-momentum': { completedAt: 3 } } }));
+  persistNow();
+  assert.equal(saves.length, 1); // saved to the account...
+  assert.deepEqual(Object.keys(saves[0].state.learning.lessons).sort(), ['how-prices-move', 'rsi-momentum']);
+  assert.deepEqual(Object.keys(readGuestData().state.learning.lessons), ['what-is-a-stock']); // ...not to the guest
+
+  switchOwner({ kind: 'guest' }, { data: readGuestData(), flush: false }); // signing out
+  assert.deepEqual(Object.keys(getState().learning.lessons), ['what-is-a-stock']);
+  assert.equal(saves.length, 1);
+});
+
+test('an account with nothing saved takes over the progress in this browser', () => {
+  initStore();
+  updateSlice('learning', () => ({ lessons: { 'candlestick-anatomy': { completedAt: 1 } } }));
+  persistNow();
+  const claimed = personalSnapshot();
+  switchOwner({ kind: 'user', id: 8 }, { save: () => {} }); // no data: keep what's in the store
+  assert.deepEqual(Object.keys(getState().learning.lessons), ['candlestick-anatomy']);
+  assert.deepEqual(Object.keys(claimed.state.learning.lessons), ['candlestick-anatomy']);
+  resetGuestData(); // after the account has it, the guest starts fresh
+  assert.deepEqual(readGuestData().state.learning.lessons, {});
+  assert.ok(!('ui' in readGuestData().state)); // the sidebar setting belongs to the device
 });

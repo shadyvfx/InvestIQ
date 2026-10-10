@@ -161,7 +161,7 @@ export default {
     const loadPerformance = async () => {
       const id = ++perfRequest;
       const { points } = await getPerformance();
-      if (id !== perfRequest) return;
+      if (id !== perfRequest || disposer.disposed) return;
       perfPoints = points;
       const body = $('#perf-body', root);
       const startingCash = getState().account.startingCash;

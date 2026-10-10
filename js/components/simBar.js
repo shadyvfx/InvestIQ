@@ -56,7 +56,7 @@ export function mountSimBar(container) {
     }
   });
 
-  const unwatch = watch((state) => state.market.day, paint);
+  const unwatch = watch((state) => state.market, paint);
   paint();
   return () => {
     off();

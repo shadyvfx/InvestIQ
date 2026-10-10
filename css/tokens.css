@@ -77,6 +77,8 @@
   --warn-wash: rgb(227 176 75 / 0.12);
   --good: #3fbf86;
   --bad: #ef6b6b;
+  --good-wash: rgb(63 191 134 / 0.12);
+  --bad-wash: rgb(239 107 107 / 0.12);
 
   /* The "paper money" hatch that marks simulated values */
   --hatch: #4a515b;
@@ -187,6 +189,8 @@
     --warn-wash: rgb(143 98 0 / 0.1);
     --good: #0c7650;
     --bad: #c0313a;
+    --good-wash: rgb(12 118 80 / 0.1);
+    --bad-wash: rgb(192 49 58 / 0.1);
     --hatch: #b4bbc5;
     --chart-grid: #e6e8ec;
     --chart-axis: #626a76;
@@ -224,6 +228,8 @@
   --warn-wash: rgb(143 98 0 / 0.1);
   --good: #0c7650;
   --bad: #c0313a;
+  --good-wash: rgb(12 118 80 / 0.1);
+  --bad-wash: rgb(192 49 58 / 0.1);
   --hatch: #b4bbc5;
   --chart-grid: #e6e8ec;
   --chart-axis: #626a76;

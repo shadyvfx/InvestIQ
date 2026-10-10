@@ -11,14 +11,14 @@ import { openDialog } from './modals.js';
 
 function buildItems() {
   const { instruments } = getState().runtime;
-  const pages = ROUTES.filter((route) => route.nav).map((route) => ({
+  const pages = ROUTES.filter((route) => route.nav || route.palette).map((route) => ({
     group: 'Pages',
     id: `page-${route.id}`,
     label: route.title,
     meta: '',
     icon: route.icon,
     href: `#${route.path}`,
-    keywords: route.title.toLowerCase(),
+    keywords: `${route.title} ${route.keywords || ''}`.toLowerCase(),
   }));
   const stocks = instruments.map((instrument) => ({
     group: 'Simulated stocks',

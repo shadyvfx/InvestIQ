@@ -1,5 +1,7 @@
-// HTTP client for the future Flask backend. Only used when
-// config.dataSource is 'api'; the mock adapters never touch the network.
+// HTTP client for the TradeLab server. Accounts and each account's saved
+// progress always use it; the market, trading, progress and journal services
+// use it only when config.dataSource is 'api' (their mock adapters never touch
+// the network).
 //
 // Error contract expected from the backend (any non-2xx response):
 //   { "error": { "code": "insufficient_cash", "message": "Readable text", "field": "quantity" } }
@@ -17,7 +19,14 @@ export class ApiError extends Error {
   }
 }
 
-export async function request(method, path, { body, query, signal, timeoutMs = config.apiTimeoutMs } = {}) {
+// Browsers refuse keepalive requests with more than 64 KB of body in flight.
+const KEEPALIVE_MAX_BYTES = 60 * 1024;
+
+/**
+ * Sends a JSON request. `keepalive` lets a save finish while the page is
+ * closing; bodies too large for it are sent as ordinary requests.
+ */
+export async function request(method, path, { body, query, signal, timeoutMs = config.apiTimeoutMs, keepalive = false } = {}) {
   const base = config.apiBaseUrl.replace(/\/$/, '');
   // Relative bases ('/api') resolve against the page; apps without a page
   // (React Native, say) need an absolute apiBaseUrl.
@@ -34,12 +43,14 @@ export async function request(method, path, { body, query, signal, timeoutMs = c
   signal?.addEventListener('abort', abortFromCaller, { once: true });
 
   try {
+    const text = body !== undefined ? JSON.stringify(body) : undefined;
     const response = await fetch(url, {
       method,
-      headers: { Accept: 'application/json', ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers: { Accept: 'application/json', ...(text !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+      body: text,
       credentials: 'same-origin',
       signal: controller.signal,
+      keepalive: keepalive && (text === undefined || new TextEncoder().encode(text).length <= KEEPALIVE_MAX_BYTES),
     });
     const data = response.status === 204 ? null : await response.json().catch(() => null);
     if (!response.ok) {

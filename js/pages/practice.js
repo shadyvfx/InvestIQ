@@ -431,7 +431,7 @@ export default {
       const id = ++request;
       container.classList.add('is-refreshing');
       const next = await getHistory(ui.symbol, ui.range);
-      if (id !== request) return;
+      if (id !== request || disposer.disposed) return;
       history = next;
       container.classList.remove('is-refreshing');
       const range = RANGES.find((r) => r.id === ui.range);

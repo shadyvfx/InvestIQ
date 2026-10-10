@@ -178,6 +178,7 @@
 
 .seg__item[aria-pressed='true'],
 .seg__item[aria-selected='true'],
+.seg__item[aria-current='page'],
 .seg__opt input:checked + .seg__item {
   background: var(--raised);
   box-shadow: inset 0 0 0 1px var(--line-strong);
@@ -188,6 +189,11 @@
 .seg__opt {
   position: relative;
   display: inline-flex;
+}
+
+/* Segmented links (page tabs such as Create account / Sign in) */
+.seg__link {
+  text-decoration: none;
 }
 
 .seg__opt input {
@@ -611,6 +617,7 @@ button.pill:hover {
 
 .avatar {
   display: grid;
+  flex: none;
   place-items: center;
   width: 30px;
   height: 30px;
@@ -621,6 +628,17 @@ button.pill:hover {
   font-size: var(--fs-12);
   font-weight: var(--w-semibold);
   font-stretch: var(--wide);
+}
+
+.avatar svg {
+  width: 16px;
+  height: 16px;
+}
+
+.avatar--lg {
+  width: 48px;
+  height: 48px;
+  font-size: var(--fs-16);
 }
 
 /* ---------- The simulated-money mark ---------- */
@@ -1027,6 +1045,56 @@ button.sim-pill[aria-expanded='true'] {
 
 .callout--plain {
   background: transparent;
+}
+
+/* Status results: always an icon and a title in words, never color alone */
+.callout--error {
+  border-color: transparent;
+  background: var(--bad-wash);
+}
+
+.callout--error .callout__icon,
+.callout--error .callout__title {
+  color: var(--bad);
+}
+
+.callout--success {
+  border-color: transparent;
+  background: var(--good-wash);
+}
+
+.callout--success .callout__icon,
+.callout--success .callout__title {
+  color: var(--good);
+}
+
+/* Requirement checklist (for example, password rules under the field) */
+.checklist {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+}
+
+.checklist__item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--fg-3);
+  font-size: var(--fs-13);
+}
+
+.checklist__icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.checklist__item.is-met {
+  color: var(--fg);
+}
+
+.checklist__item.is-met .checklist__icon {
+  color: var(--good);
 }
 
 .callout__actions {
@@ -1698,4 +1766,66 @@ button.sim-pill[aria-expanded='true'] {
 
 .terms dd {
   color: var(--fg-2);
+}
+
+.popover__who {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Live email checker under the email field: one line tall even when idle, so
+   results appearing never push the rest of the form down. */
+.email-check {
+  min-height: 20px;
+}
+
+.email-check__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--fg-3);
+  font-size: var(--fs-13);
+  line-height: 1.4;
+}
+
+.email-check__line svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.email-check__line--good {
+  color: var(--good);
+}
+
+.email-check__line--bad {
+  color: var(--bad);
+}
+
+.email-check__use {
+  margin-left: 2px;
+}
+
+/* "Progress saved to your account" line on the Account page */
+.account-sync {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-3);
+}
+
+.account-sync svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.account-sync--saved svg,
+.account-sync--idle svg {
+  color: var(--good);
+}
+
+.account-sync--error {
+  color: var(--warn);
 }

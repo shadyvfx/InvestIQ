@@ -1,0 +1,195 @@
+{
+  "_comment": "Shared cases for the sign-up and sign-in rules. tests/core.test.mjs checks js/core/accounts.js against them and tests/test_accounts.py checks server/accounts.py, so the browser and the server always agree.",
+  "registration": [
+    {
+      "name": "valid account",
+      "input": { "username": "ay_0b", "email": "Ay.Rannan@Example.com", "password": "Tr@deLab1" },
+      "errors": {},
+      "value": { "username": "ay_0b", "email": "ay.rannan@example.com" }
+    },
+    {
+      "name": "everything empty",
+      "input": { "username": "", "email": "", "password": "" },
+      "errors": { "username": "Enter a username.", "email": "Enter your email address.", "password": "Enter a password." }
+    },
+    {
+      "name": "username with a space",
+      "input": { "username": "ay rannan", "email": "ay@example.com", "password": "Tr@deLab1" },
+      "errors": { "username": "Usernames can't contain spaces." }
+    },
+    {
+      "name": "username with a leading space",
+      "input": { "username": " ayoub", "email": "ay@example.com", "password": "Tr@deLab1" },
+      "errors": { "username": "Usernames can't contain spaces." }
+    },
+    {
+      "name": "username with a tab",
+      "input": { "username": "ay\tb", "email": "ay@example.com", "password": "Tr@deLab1" },
+      "errors": { "username": "Usernames can't contain spaces." }
+    },
+    {
+      "name": "username with an invisible character",
+      "input": { "username": "admin​", "email": "ay@example.com", "password": "Tr@deLab1" },
+      "errors": { "username": "Usernames can't contain invisible characters." }
+    },
+    {
+      "name": "username with an at sign",
+      "input": { "username": "ay@home", "email": "ay@example.com", "password": "Tr@deLab1" },
+      "errors": { "username": "Usernames can't contain @, so they can't be mistaken for an email address." }
+    },
+    {
+      "name": "username too long",
+      "input": { "username": "abcdefghijabcdefghijabcdefghijk", "email": "ay@example.com", "password": "Tr@deLab1" },
+      "errors": { "username": "Keep your username to 30 characters or fewer." }
+    },
+    {
+      "name": "username of exactly 30 characters",
+      "input": { "username": "abcdefghijabcdefghijabcdefghij", "email": "ay@example.com", "password": "Tr@deLab1" },
+      "errors": {},
+      "value": { "username": "abcdefghijabcdefghijabcdefghij", "email": "ay@example.com" }
+    },
+    {
+      "name": "username with symbols and accents",
+      "input": { "username": "Ayoub.R-42!é", "email": "ay@example.com", "password": "Tr@deLab1" },
+      "errors": {},
+      "value": { "username": "Ayoub.R-42!é", "email": "ay@example.com" }
+    },
+    {
+      "name": "email without @",
+      "input": { "username": "ay", "email": "ayexample.com", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email without a domain ending",
+      "input": { "username": "ay", "email": "ay@example", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email with a space inside",
+      "input": { "username": "ay", "email": "ay rannan@example.com", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email with two dots in a row",
+      "input": { "username": "ay", "email": "ay..r@example.com", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email starting with a dot",
+      "input": { "username": "ay", "email": ".ay@example.com", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email with a dot before @",
+      "input": { "username": "ay", "email": "ay.@example.com", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email domain starting with a hyphen",
+      "input": { "username": "ay", "email": "ay@-example.com", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email with a numeric ending",
+      "input": { "username": "ay", "email": "ay@example.123", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email using a localhost-style domain",
+      "input": { "username": "ay", "email": "ay@localhost.localhost", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email with two @",
+      "input": { "username": "ay", "email": "a@b@example.com", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email with a plus and a subdomain",
+      "input": { "username": "ay", "email": "ay+trading@mail.example.co.uk", "password": "Tr@deLab1" },
+      "errors": {},
+      "value": { "username": "ay", "email": "ay+trading@mail.example.co.uk" }
+    },
+    {
+      "name": "email with spaces around it",
+      "input": { "username": "ay", "email": "  ay@example.com  ", "password": "Tr@deLab1" },
+      "errors": {},
+      "value": { "username": "ay", "email": "ay@example.com" }
+    },
+    {
+      "name": "email local part over 64 characters",
+      "input": { "username": "ay", "email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.com", "password": "Tr@deLab1" },
+      "errors": { "email": "Enter a valid email address, like name@example.com." }
+    },
+    {
+      "name": "email over 254 characters",
+      "input": { "username": "ay", "email": "ay@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.com", "password": "Tr@deLab1" },
+      "errors": { "email": "That email address is too long." }
+    },
+    {
+      "name": "password too short",
+      "input": { "username": "ay", "email": "ay@example.com", "password": "Ab!12" },
+      "errors": { "password": "Your password needs at least 8 characters." }
+    },
+    {
+      "name": "password without a capital letter",
+      "input": { "username": "ay", "email": "ay@example.com", "password": "tradelab!1" },
+      "errors": { "password": "Your password needs a capital letter." }
+    },
+    {
+      "name": "password without a special character",
+      "input": { "username": "ay", "email": "ay@example.com", "password": "TradeLab1" },
+      "errors": { "password": "Your password needs a special character." }
+    },
+    {
+      "name": "password missing everything",
+      "input": { "username": "ay", "email": "ay@example.com", "password": "abc" },
+      "errors": { "password": "Your password needs at least 8 characters, a capital letter and a special character." }
+    },
+    {
+      "name": "password too short and without a special character",
+      "input": { "username": "ay", "email": "ay@example.com", "password": "Abcdefg" },
+      "errors": { "password": "Your password needs at least 8 characters and a special character." }
+    },
+    {
+      "name": "a space is not a special character",
+      "input": { "username": "ay", "email": "ay@example.com", "password": "Trade Lab" },
+      "errors": { "password": "Your password needs a special character." }
+    },
+    {
+      "name": "password of exactly 8 characters",
+      "input": { "username": "ay", "email": "ay@example.com", "password": "Abcdef!1" },
+      "errors": {},
+      "value": { "username": "ay", "email": "ay@example.com" }
+    },
+    {
+      "name": "accented capital and an emoji count",
+      "input": { "username": "ay", "email": "ay@example.com", "password": "économie😀É" },
+      "errors": {},
+      "value": { "username": "ay", "email": "ay@example.com" }
+    },
+    {
+      "name": "password over 128 characters",
+      "input": { "username": "ay", "email": "ay@example.com", "password": "A!aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      "errors": { "password": "Keep your password to 128 characters or fewer." }
+    },
+    {
+      "name": "missing fields are treated as empty",
+      "input": {},
+      "errors": { "username": "Enter a username.", "email": "Enter your email address.", "password": "Enter a password." }
+    }
+  ],
+  "signIn": [
+    {
+      "name": "both empty",
+      "input": { "login": "", "password": "" },
+      "errors": { "login": "Enter your username or email.", "password": "Enter your password." }
+    },
+    {
+      "name": "login is trimmed, password is not",
+      "input": { "login": "  ay_0b ", "password": " x " },
+      "errors": {},
+      "value": { "login": "ay_0b" }
+    }
+  ]
+}

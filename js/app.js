@@ -19,6 +19,7 @@ import portfolio from './pages/portfolio.js';
 import journal from './pages/journal.js';
 import tutor from './pages/tutor.js';
 import settings from './pages/settings.js';
+import account from './pages/account.js';
 import notFound from './pages/notFound.js';
 
 const PAGES = {
@@ -31,6 +32,7 @@ const PAGES = {
   journal,
   tutor,
   settings,
+  account,
   'not-found': notFound,
 };
 
@@ -119,7 +121,7 @@ async function boot() {
   let current = { page: null, instance: null, routeId: null };
 
   router = createRouter({
-    onRoute(match, previous) {
+    onRoute(match, previous, { remount = false } = {}) {
       const page = PAGES[match.route.id] || notFound;
       const parentId = match.route.parent || match.route.id;
       shell.setActive(parentId);
@@ -133,8 +135,12 @@ async function boot() {
         setTitle: (title, crumbs) => shell.setTitle(title, crumbs),
       };
 
+      // Rebuilding after someone signed in or out: pages that manage that
+      // themselves (the Account page) stay as they are.
+      if (remount && page.keepOnOwnerChange && current.page === page) return;
+
       // Same page with new parameters (for example another stock): update in place.
-      if (current.page === page && current.instance?.update && previous) {
+      if (!remount && current.page === page && current.instance?.update && previous) {
         current.instance.update(ctx);
         return;
       }
@@ -150,13 +156,17 @@ async function boot() {
       const instance = typeof result === 'function' ? { cleanup: result } : result || {};
       current = { page, instance, routeId: match.route.id };
 
-      if (previous) {
+      if (previous && !remount) {
         window.scrollTo({ top: 0 });
         shell.main.focus({ preventScroll: true });
         announce(`${document.getElementById('page-title')?.textContent || match.route.title} page`);
       }
     },
   });
+
+  // Signing in or out swaps whose progress is in the store; rebuild the page
+  // so nothing from the previous person stays on screen.
+  window.addEventListener('tradelab:owner-changed', () => router.refresh({ remount: true }));
 
   router.start();
 }

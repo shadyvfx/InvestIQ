@@ -256,6 +256,7 @@ export default {
 
     const loadSparks = async () => {
       sparks = await getSparklines(getState().watchlist, 30);
+      if (disposer.disposed) return; // the page was left or rebuilt meanwhile
       paintWatch();
     };
 
@@ -264,7 +265,7 @@ export default {
       const container = $('#dash-chart', root);
       container.classList.add('is-refreshing');
       const history = await getHistory(chartSymbol, chartRange);
-      if (request !== historyRequest) return;
+      if (request !== historyRequest || disposer.disposed) return;
       container.classList.remove('is-refreshing');
       const range = RANGES.find((r) => r.id === chartRange);
       const label = describeHistory(chartSymbol, history, range?.description || chartRange);

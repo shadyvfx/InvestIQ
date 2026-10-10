@@ -15,6 +15,8 @@ export const ROUTES = [
   { id: 'journal', path: '/journal', title: 'Trading Journal', nav: true, icon: 'journal' },
   { id: 'tutor', path: '/tutor', title: 'AI Tutor', nav: true, icon: 'tutor' },
   { id: 'settings', path: '/settings', title: 'Settings', nav: true, icon: 'settings', navGroup: 'bottom' },
+  // Reached from the header's Sign up button and profile menu, and from search.
+  { id: 'account', path: '/account', title: 'Account', icon: 'user', palette: true, keywords: 'account sign up sign in log in register create profile username password email' },
 ];
 
 export const NOT_FOUND = { id: 'not-found', path: '*', title: 'Page not found' };
@@ -66,14 +68,14 @@ export function href(path, query) {
 export function createRouter({ onRoute }) {
   let current = null;
 
-  function handle(hash = window.location.hash, { force = false } = {}) {
+  function handle(hash = window.location.hash, { force = false, remount = false } = {}) {
     // Hashes that are not routes (such as #main from the skip link) are ignored.
     if (hash && !String(hash).startsWith('#/') && hash !== '#') return;
     const match = parseHash(hash);
     if (!force && current && current.href === match.href) return;
     const previous = current;
     current = match;
-    onRoute(match, previous);
+    onRoute(match, previous, { remount });
   }
 
   function navigate(to, { replace = false } = {}) {
@@ -106,8 +108,9 @@ export function createRouter({ onRoute }) {
       handle(initial, { force: true });
     },
     navigate,
-    refresh() {
-      if (current) handle(current.href, { force: true });
+    /** Shows the current route again; with `remount`, the page is rebuilt from scratch. */
+    refresh({ remount = false } = {}) {
+      if (current) handle(current.href, { force: true, remount });
     },
     current: () => current,
   };

@@ -1,27 +1,30 @@
 # TradeLab frontend
 
-TradeLab teaches beginners how the stock market works: interactive lessons, paper trading with virtual money, a portfolio view, a trading journal and a tutor. This repository is the **frontend only**. Every price is simulated, every dollar is virtual, and the tutor runs in a preview mode with prewritten answers.
+TradeLab teaches beginners how the stock market works: interactive lessons, paper trading with virtual money, a portfolio view, a trading journal and a tutor. This repository is the frontend plus a small local server for **user accounts** (sign-up and sign-in, saved in a SQLite database). Every price is simulated, every dollar is virtual, and the tutor runs in a preview mode with prewritten answers.
 
-Built with HTML, CSS and vanilla JavaScript (ES modules). Chart.js is the only third-party code, and it is vendored, so there is nothing to install.
+Built with HTML, CSS and vanilla JavaScript (ES modules); the account server uses only Python's standard library. Chart.js is the only third-party code, and it is vendored, so there is nothing to install.
 
 ## Run it locally
 
-ES modules don't load from `file://`, so serve the folder over HTTP. Either server works and neither needs any packages:
+ES modules don't load from `file://`, so serve the folder over HTTP. Neither server needs any packages:
 
 ```bash
-# Node 18 or newer
-npm run dev                      # http://127.0.0.1:5173
+# Python 3.8 or newer: the whole app, including sign-up and sign-in
+python3 scripts/dev_server.py    # http://127.0.0.1:5173
 
-# or Python 3.7 or newer
-python scripts/dev_server.py     # http://127.0.0.1:5173
+# Node 18 or newer: the app without accounts (frontend work only)
+npm run dev                      # http://127.0.0.1:5173
 ```
 
-Use another port with `npm run dev -- 8000` or `python scripts/dev_server.py 8000`. Both servers send the right MIME type for `.js` files (some Windows setups otherwise break module loading) and disable caching so edits show up on refresh.
+`npm run server` starts the Python server too. Use another port with `python3 scripts/dev_server.py 8000` or `npm run dev -- 8000`. Both servers send the right MIME type for `.js` files (some Windows setups otherwise break module loading) and disable caching so edits show up on refresh. On Windows, type `python` instead of `python3`.
 
-Run the unit tests for the business logic (Node's built-in test runner, no dependencies):
+The Python server saves accounts in `tradelab.db` in this folder, and creates the file on first run. When you use the Node server, the Account page says that accounts need the Python server.
+
+Run the tests (no dependencies for either):
 
 ```bash
-npm test
+npm test                                   # business rules and sign-up rules (Node)
+python3 -m unittest discover -s tests -v   # account server and user database (Python)
 ```
 
 ## What you get on first launch
@@ -42,6 +45,7 @@ Prices only change when you press **Advance 1 day** or **Advance 1 week**. That 
 | Trading Journal | Entries with symbol, entry and exit price, shares, planned stop and target, thesis, risks and lessons. Create, edit and delete. Insights score planning and follow-through first; outcome statistics appear after three closed entries. |
 | AI Tutor | Chat with suggested questions, a loading state, formatted answers and a clear-conversation control. Answers are prewritten and labeled as such. Two topics read your simulated account ("my last trade", "my portfolio"). |
 | Settings | Theme (dark, light, system), gain and loss colors (green/red or blue/orange), density, reduced motion, default chart style and range, learning level, account reset and clearing local data. |
+| Account | Create an account (username, email, password) or sign in, with live checks and a status message for every result. Reached from **Sign up** in the header or the profile menu. |
 
 Search with **Ctrl+K**, **Cmd+K** or **/** to jump to any page, simulated stock or lesson.
 
@@ -69,7 +73,7 @@ tradelab/
     state.js                 Central store, persistence, derived selectors
     storage.js               localStorage wrapper with in-memory fallback
     core/                    Pure business logic (no DOM): portfolio, orders, progress,
-                             journal, calendar, seeded random numbers
+                             journal, accounts, calendar, seeded random numbers
     data/                    Mock data: market model, lessons, tutor answers, example account
     services/                The only layer that reads or writes domain data; each has a
                              mock adapter and a remote (Flask) adapter
@@ -79,8 +83,14 @@ tradelab/
   docs/
     integration.md           Flask API contract and the llama.cpp tutor plan
     mobile.md                What carries over to a mobile app and what doesn't
-  scripts/                   Zero-dependency dev servers (Node and Python)
-  tests/core.test.mjs        Unit tests for core/ and the mock data
+  server/accounts.py         Sign-up rules, password hashing, the SQLite user database, saved progress
+  server/email_check.py      Email checker: provider typos, reserved domains, DNS MX lookup
+  scripts/                   Zero-dependency servers: dev_server.py (app + accounts), dev-server.mjs (app only)
+  tests/
+    core.test.mjs            Unit tests for core/, the mock data and the sign-up rules
+    test_accounts.py         Unit tests for the account server and database
+    account-cases.json       Sign-up cases both test suites check, so browser and server agree
+  tradelab.db                The user database (created by the Python server; not in git)
 ```
 
 Icons are drawn in `js/components/icons.js` (one consistent 24px set) rather than as separate files, so they inherit color from the theme.
@@ -99,6 +109,55 @@ Both adapters return the same shapes and the service writes the result into the 
 **Business rules are pure functions.** Order validation, fills, P/L, day change, the equity curve, quiz grading, lesson progress, journal validation and journal statistics live in `js/core/` with no DOM or storage access. They are covered by `npm test` and are written to be ported to Python as-is.
 
 **Rendering is plain DOM.** Pages build markup with an `html` tagged template that escapes every value by default (`utils/dom.js`), use event delegation, and re-render only the regions whose store slice changed (`watch()`).
+
+## Accounts and the user database
+
+Sign up on the **Account** page (header: **Sign up**, or the profile menu). The form asks for:
+
+- a **username**: no spaces or @, up to 30 characters, unique (capital letters don't count, so Ayoub and ayoub are the same)
+- an **email** address that can actually receive mail (stored in lowercase, unique). See "The email checker" below.
+- a **password** of at least 8 characters with at least one capital letter and one special character such as ! @ # or $
+
+A checklist under the password field ticks off each requirement as you type, and a line under the email field shows what the email checker found. When you submit, a status banner at the top of the form shows the result: **Account created** in green with a check mark, or **Account not created** in red, listing each problem with a link to the field. The same messages appear under the fields. Sign in with your username or email; signing in and out shows a status too.
+
+### The email checker
+
+When you pause typing an email, and again when you submit, the server checks (`server/email_check.py`, standard library only):
+
+1. **Typos of popular providers.** gnail.com, gmial.com, hotmial.com, yahooo.com, outlok.com and similar get "Did you mean …@gmail.com?" with a button that fixes the address. These typo domains usually exist and even accept mail (typo-squatters register them), so a DNS lookup alone would let them through.
+2. **Reserved and made-up endings.** example.com, .test and .invalid can't receive mail; endings like .con or .ed get "Did you mean .com / .edu?".
+3. **The domain's mail servers.** A DNS lookup for MX records rejects domains that don't exist, have no mail server, or publish a "null MX" (meaning they never accept mail).
+
+The lookup uses the DNS servers in `/etc/resolv.conf`, then 1.1.1.1 and 8.8.8.8, and caches answers for ten minutes. If no DNS server answers (you're offline), the address is accepted as unverified so sign-up still works. Set `TRADELAB_DNS_SERVER` to use a specific DNS server. Try the checker on its own:
+
+```bash
+python3 server/email_check.py you@gmail.com someone@gnail.com
+```
+
+This proves the address's domain can receive email, not that the mailbox exists or belongs to the person signing up. That takes a confirmation email, which needs an email account (SMTP) for the server to send from.
+
+### Progress belongs to each account
+
+Signed in, everything you do (lessons, simulated trades and the simulated day, journal entries, the tutor conversation, notifications and settings) is saved to your account in the `user_data` table and loads again whenever you sign in, in any browser. Changes save about a second after you make them; the Account page shows "Progress saved to your account".
+
+Signed out, TradeLab shows a separate **guest** copy kept in this browser, so one person's progress never shows for another. When an account has nothing saved yet (a new sign-up, or an account from before this feature), it takes over the progress in this browser, and the guest copy starts fresh.
+
+How it works:
+
+- The browser checks the rules first (`js/core/accounts.js`), and the server checks them again (`server/accounts.py`) and has the final say. Both use the same messages, and `tests/account-cases.json` is run against both.
+- Accounts are saved in the `users` table of `tradelab.db`. Passwords are never stored: the server keeps a salted PBKDF2-SHA256 hash (1,000,000 iterations) in Werkzeug's format, so a Flask backend can check them with `werkzeug.security.check_password_hash`.
+- If `tradelab.db` already has a `users` table (`id`, `display_name`, `email`, `password_hash`, `created_at`), the server adds a `username` column and leaves existing rows alone. Those accounts sign in with their email. New accounts get the username in both `username` and `display_name`.
+- Signing in sets an HttpOnly, SameSite=Lax session cookie that lasts 7 days. The `sessions` table stores only a hash of each session token.
+- The server refuses requests from other websites that would change anything (signing up, in or out, or saving progress), and never serves the database, its own code or dotfiles such as `.git`.
+- **Settings > Start over** (signed in) resets your account's progress; **Clear all local demo data** (signed out) resets the guest copy. Neither deletes accounts.
+
+See every account (never the passwords), and when each one last saved progress, from this folder with:
+
+```bash
+python3 -c "import sqlite3; [print(row) for row in sqlite3.connect('tradelab.db').execute('SELECT u.id, u.username, u.email, u.created_at, d.updated_at FROM users u LEFT JOIN user_data d ON d.user_id = u.id')]"
+```
+
+The account API (`POST /api/users`, `POST`/`GET`/`DELETE /api/session`, `POST /api/email-check`, `GET`/`PUT /api/me/data`) is described in [docs/integration.md](docs/integration.md#accounts).
 
 ## Mock data
 
@@ -127,10 +186,11 @@ See [docs/integration.md](docs/integration.md) for the endpoint list with reques
 
 ## Known limitations
 
-- **Frontend only.** No backend, accounts or authentication. Data lives in this browser's `localStorage` and is not a secure or permanent store. Clearing site data resets everything.
+- **Guest data is browser-only.** Signed out, progress lives in this browser's `localStorage`, which is not a secure or permanent store; clearing site data resets it. Signed in, it's saved to your account on the server.
+- **Accounts are a local prototype.** No confirmation emails, password reset or rate limiting on sign-in. The email checker confirms the domain receives mail, not the mailbox. The Python server listens only on 127.0.0.1 over plain HTTP; a public deployment needs HTTPS and a production server.
 - **Market orders only.** Limit and stop orders, fractional shares, short selling, fees, dividends and a bid/ask spread are not simulated yet. The order lesson says so.
 - **Tutor preview.** A fixed set of prewritten topics; anything else gets an honest "I don't have an answer for that yet".
-- **One tab at a time.** Two open tabs don't sync with each other.
+- **One tab at a time.** Two open tabs don't sync with each other; signed in, the last tab to save wins.
 - **No market holidays** in the simulated calendar.
 - **English only**, US dollar formatting.
 

@@ -75,11 +75,14 @@ export function on(root, type, selector, handler, options) {
 export function createDisposer() {
   const fns = [];
   return {
+    /** True once the page has been cleaned up; async work checks it before drawing. */
+    disposed: false,
     add(fn) {
       if (typeof fn === 'function') fns.push(fn);
       return fn;
     },
     dispose() {
+      this.disposed = true;
       while (fns.length) {
         try {
           fns.pop()();

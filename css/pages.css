@@ -1820,3 +1820,124 @@
 .palette .palette__search {
   padding-right: 52px;
 }
+
+/* ==========================================================================
+   Account (sign up and sign in)
+   ========================================================================== */
+.account-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 480px) minmax(0, 320px);
+  justify-content: center;
+  align-items: start;
+  gap: var(--gap);
+}
+
+.account-card__head {
+  padding-block: var(--s-4);
+}
+
+.account-card .panel__title {
+  font-size: var(--fs-18);
+  font-stretch: var(--wide);
+}
+
+.account-status:empty {
+  display: none;
+}
+
+.account-status__box:focus {
+  outline: none;
+}
+
+.account-status__box:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.account-status__list {
+  display: grid;
+  gap: 2px;
+  margin-top: var(--s-2);
+  padding-left: 1.1em;
+}
+
+.account-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+/* Password field with a Show/Hide button inside it, after the input in tab order */
+.input-reveal {
+  position: relative;
+  display: flex;
+}
+
+.input-reveal .input {
+  padding-right: 72px;
+}
+
+.input-reveal__btn {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+}
+
+.account-form__alt {
+  color: var(--fg-2);
+  text-align: center;
+}
+
+.account-profile {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 0;
+}
+
+.account-profile__text {
+  min-width: 0;
+}
+
+.account-profile__name {
+  font-size: var(--fs-18);
+  font-weight: var(--w-semibold);
+  font-stretch: var(--wide);
+  overflow-wrap: anywhere;
+}
+
+.account-profile__email {
+  overflow-wrap: anywhere;
+}
+
+.account-about__list {
+  display: grid;
+  gap: var(--s-4);
+  list-style: none;
+}
+
+.account-about__list li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: var(--s-3);
+  color: var(--fg-2);
+}
+
+.account-about__list svg {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  color: var(--fg-3);
+}
+
+.account-about__list strong {
+  color: var(--fg);
+  font-weight: var(--w-semibold);
+}
+
+/* Header: Sign up button for signed-out visitors */
+.topbar__signup {
+  white-space: nowrap;
+}
+

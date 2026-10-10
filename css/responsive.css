@@ -594,3 +594,21 @@
     --gutter: 32px;
   }
 }
+
+/* ---------- Account page and the header's Sign up button ---------- */
+@media (max-width: 1099px) {
+  .account-layout {
+    grid-template-columns: minmax(0, 560px);
+  }
+}
+
+@media (max-width: 640px) {
+  .account-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Phones reach sign-up from the profile button instead. */
+  .topbar__signup {
+    display: none;
+  }
+}

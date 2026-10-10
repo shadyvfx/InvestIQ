@@ -23,8 +23,9 @@
       (function () {
         var root = document.documentElement;
         try {
+          var device = JSON.parse(window.localStorage.getItem('tradelab:v1:device') || 'null');
           var saved = JSON.parse(window.localStorage.getItem('tradelab:v1') || 'null');
-          var prefs = (saved && saved.state && saved.state.preferences) || {};
+          var prefs = (device && device.display) || (saved && saved.state && saved.state.preferences) || {};
           if (prefs.theme === 'system') root.removeAttribute('data-theme');
           else if (prefs.theme === 'light') root.setAttribute('data-theme', 'light');
           if (prefs.movement === 'blue-orange') root.setAttribute('data-movement', 'blue-orange');
