@@ -1745,6 +1745,23 @@ button.sim-pill[aria-expanded='true'] {
   text-decoration-color: currentColor;
 }
 
+.prose pre {
+  overflow-x: auto;
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--sunken);
+}
+
+.prose pre code {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  white-space: pre;
+}
+
 .prose--sm {
   font-size: var(--fs-14);
   line-height: 1.6;

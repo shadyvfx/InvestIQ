@@ -87,11 +87,11 @@ function dataLocationHint(bytes, state) {
   const size = `about ${Math.max(1, Math.round(bytes / 1024))} KB`;
   if (!storageAvailable()) {
     return isMock()
-      ? 'This browser is blocking local storage, so changes last only until you close the tab.'
+      ? `This browser is blocking local storage, so changes last only until you close the tab.${config.tutorApiEnabled ? ' Tutor messages are sent only to the local Flask and Qwen servers.' : ''}`
       : 'Your account, lessons and journal are saved on the TradeLab server. This browser is blocking local storage, so preferences and the tutor conversation reset when you close the tab.';
   }
   return isMock()
-    ? `You're not signed in, so progress, journal entries, the tutor conversation and preferences are kept in this browser's local storage (${size}) as guest data. That's a prototype convenience, not a secure or permanent store. Sign in to save progress to your account instead.`
+    ? `You're not signed in, so progress, journal entries, the tutor conversation and preferences are kept in this browser's local storage (${size}) as guest data. That's a prototype convenience, not a secure or permanent store. Sign in to save progress to your account instead.${config.tutorApiEnabled ? ' Tutor messages are sent only to the local Flask and Qwen servers.' : ''}`
     : `Your simulated account, lesson progress and journal are saved on the TradeLab server (${config.apiBaseUrl}). This browser keeps your preferences, the tutor conversation and notifications (${size}).`;
 }
 
@@ -255,7 +255,7 @@ function page(state) {
           <div class="kv__row"><dt class="kv__key">Version</dt><dd class="kv__val">${config.appName} frontend ${config.version}</dd></div>
           <div class="kv__row"><dt class="kv__key">Data source</dt><dd class="kv__val">${isMock() ? 'Local mock data (no server)' : `Backend at ${config.apiBaseUrl}`}</dd></div>
           <div class="kv__row"><dt class="kv__key">Market prices</dt><dd class="kv__val">Simulated, fictional companies</dd></div>
-          <div class="kv__row"><dt class="kv__key">Tutor</dt><dd class="kv__val">${isMock() ? 'Preview mode, prewritten answers' : 'Backend language model'}</dd></div>
+          <div class="kv__row"><dt class="kv__key">Tutor</dt><dd class="kv__val">${config.tutorApiEnabled ? 'Local Qwen language model' : isMock() ? 'Preview mode, prewritten answers' : 'Backend language model'}</dd></div>
           <div class="kv__row"><dt class="kv__key">Account</dt><dd class="kv__val">${accountSummary(state)}</dd></div>
         </dl>
       </div>

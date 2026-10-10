@@ -1,7 +1,7 @@
-// HTTP client for the TradeLab server. Accounts and each account's saved
-// progress always use it; the market, trading, progress and journal services
-// use it only when config.dataSource is 'api' (their mock adapters never touch
-// the network).
+// HTTP client for the TradeLab servers. Accounts and each account's saved
+// progress always use it, and the tutor uses it when config.tutorApiEnabled is
+// true. The market, trading, progress and journal services use it only when
+// config.dataSource is 'api' (their mock adapters never touch the network).
 //
 // Error contract expected from the backend (any non-2xx response):
 //   { "error": { "code": "insufficient_cash", "message": "Readable text", "field": "quantity" } }
@@ -21,6 +21,32 @@ export class ApiError extends Error {
 
 // Browsers refuse keepalive requests with more than 64 KB of body in flight.
 const KEEPALIVE_MAX_BYTES = 60 * 1024;
+
+function dispatchSseEvent(eventName, dataLines, { metadata, content, completed, onChunk, onMeta }) {
+  if (!dataLines.length) return { metadata, content, completed };
+  let payload;
+  try {
+    payload = JSON.parse(dataLines.join('\n'));
+  } catch {
+    throw new ApiError('The tutor server sent an invalid response stream.', { code: 'invalid_stream' });
+  }
+  if (eventName === 'meta' || eventName === 'done') {
+    metadata = { ...metadata, ...payload };
+    if (eventName === 'meta') onMeta(metadata);
+    if (eventName === 'done') completed = true;
+  } else if (eventName === 'token') {
+    if (typeof payload.content === 'string' && payload.content) {
+      content += payload.content;
+      onChunk(payload.content);
+    }
+  } else if (eventName === 'error') {
+    throw new ApiError(payload.message || 'The tutor could not finish its response.', {
+      code: payload.code || 'stream_error',
+      details: payload,
+    });
+  }
+  return { metadata, content, completed };
+}
 
 /**
  * Sends a JSON request. `keepalive` lets a save finish while the page is
@@ -46,7 +72,7 @@ export async function request(method, path, { body, query, signal, timeoutMs = c
     const text = body !== undefined ? JSON.stringify(body) : undefined;
     const response = await fetch(url, {
       method,
-      headers: { Accept: 'application/json', ...(text !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { Accept: 'application/json', ...(text !== undefined ? { 'Content-Type': 'application/json; charset=utf-8' } : {}) },
       body: text,
       credentials: 'same-origin',
       signal: controller.signal,
@@ -68,6 +94,132 @@ export async function request(method, path, { body, query, signal, timeoutMs = c
     if (error?.name === 'AbortError') {
       if (signal?.aborted) throw error;
       throw new ApiError('The TradeLab server took too long to respond. Try again in a moment.', { code: 'timeout' });
+    }
+    throw new ApiError('Could not reach the TradeLab server. Check that the backend is running.', { code: 'network' });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abortFromCaller);
+  }
+}
+
+export async function postStream(
+  path,
+  body,
+  { signal, timeoutMs = config.apiTimeoutMs, onChunk = () => {}, onMeta = () => {} } = {},
+) {
+  const base = config.apiBaseUrl.replace(/\/$/, '');
+  const url = new URL(`${base}${path}`, globalThis.location?.href);
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const abortFromCaller = () => controller.abort();
+  signal?.addEventListener('abort', abortFromCaller, { once: true });
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'text/event-stream; charset=utf-8',
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+      body: JSON.stringify(body),
+      credentials: 'same-origin',
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      const error = data?.error || {};
+      throw new ApiError(error.message || `The server responded with status ${response.status}.`, {
+        status: response.status,
+        code: error.code,
+        field: error.field,
+        details: error.details,
+      });
+    }
+    if (!response.body) {
+      throw new ApiError('The tutor server did not provide a response stream.', { code: 'stream_unavailable' });
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    let buffer = '';
+    let eventName = 'message';
+    let dataLines = [];
+    let metadata = { source: 'llm', model: null };
+    let content = '';
+    let completed = false;
+
+    const dispatch = () => {
+      ({ metadata, content, completed } = dispatchSseEvent(eventName, dataLines, {
+        metadata,
+        content,
+        completed,
+        onChunk,
+        onMeta,
+      }));
+      eventName = 'message';
+      dataLines = [];
+    };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        try {
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        } catch {
+          throw new ApiError('The tutor server sent text that was not valid UTF-8.', { code: 'invalid_encoding' });
+        }
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const rawLine of lines) {
+          const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+          if (line === '') {
+            dispatch();
+          } else if (line.startsWith('event:')) {
+            eventName = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            dataLines.push(line.slice(5).trimStart());
+          }
+        }
+        if (done) break;
+      }
+      if (buffer) {
+        const finalLines = buffer.split('\n');
+        for (const rawLine of finalLines) {
+          const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+          if (line === '') {
+            dispatch();
+          } else if (line.startsWith('event:')) {
+            eventName = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            dataLines.push(line.slice(5).trimStart());
+          }
+        }
+        if (dataLines.length) dispatch();
+      }
+    } finally {
+      if (!completed) await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+
+    if (!completed) {
+      throw new ApiError('The tutor response ended before generation completed.', { code: 'incomplete_stream' });
+    }
+    if (!content.trim()) {
+      throw new ApiError('The tutor returned an empty response. Please try again.', { code: 'empty_response' });
+    }
+    return { reply: { content, source: metadata.source, model: metadata.model }, streamed: content.length > 0 };
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (error?.name === 'AbortError') {
+      if (signal?.aborted) throw error;
+      throw new ApiError(
+        timedOut ? 'The TradeLab server took too long to respond. Try again in a moment.' : 'The tutor response was stopped.',
+        { code: timedOut ? 'timeout' : 'aborted' },
+      );
     }
     throw new ApiError('Could not reach the TradeLab server. Check that the backend is running.', { code: 'network' });
   } finally {

@@ -3,6 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { deriveAccount, valueAccount, dayChange, equityCurve, allocation } from '../js/core/portfolio.js';
 import { previewOrder, executeMarketOrder, parseQuantity } from '../js/core/orders.js';
@@ -15,7 +16,6 @@ import { matchTopic } from '../js/data/mockTutorResponses.js';
 import { markdownToHTML } from '../js/utils/markdown.js';
 import { validateRegistration, validateSignIn, passwordChecks } from '../js/core/accounts.js';
 import { initStore, getState, updateSlice, persistNow, switchOwner, getOwner, personalSnapshot, readGuestData, resetGuestData } from '../js/state.js';
-import { readFileSync } from 'node:fs';
 
 const ACCOUNT_CASES = JSON.parse(readFileSync(new URL('./account-cases.json', import.meta.url), 'utf8'));
 
@@ -260,4 +260,15 @@ test('an account with nothing saved takes over the progress in this browser', ()
   resetGuestData(); // after the account has it, the guest starts fresh
   assert.deepEqual(readGuestData().state.learning.lessons, {});
   assert.ok(!('ui' in readGuestData().state)); // the sidebar setting belongs to the device
+});
+
+test('homepage and tutor UI expose TradeLab branding', () => {
+  const home = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const tutorPage = readFileSync(new URL('../js/pages/tutor.js', import.meta.url), 'utf8');
+
+  assert.match(home, /<title>TradeLab<\/title>/);
+  assert.match(home, /Loading TradeLab/);
+  assert.match(tutorPage, /TradeLab's AI tutor/);
+  assert.doesNotMatch(home, /InvestIQ/);
+  assert.doesNotMatch(tutorPage, /InvestIQ/);
 });
