@@ -1,22 +1,16 @@
 // TradeLab Tutor conversation.
 //
-// Preview mode (dataSource 'mock') answers from predefined explanations in
-// data/mockTutorResponses.js. It is not a language model and the interface
+// Preview mode (tutorApiEnabled false) answers from predefined explanations
+// in data/mockTutorResponses.js. It is not a language model and the interface
 // labels every reply that way.
 //
-// FLASK + llama.cpp: implement
-//   POST /api/tutor/chat
-//     { messages: [{ role: 'user'|'assistant', content }], context: { level, route, lessonId? } }
-//     -> { reply: { content, source: 'llm', model } }
-// The Flask route should build the account context server-side (it owns the
-// ledger), add a system prompt, and forward the conversation to llama.cpp's
-// OpenAI-compatible server (llama-server, POST /v1/chat/completions).
-// See docs/integration.md for a sketch, a system prompt and a streaming plan.
+// When tutorApiEnabled is true, Flask adds the system prompt and forwards this
+// conversation to the local llama.cpp OpenAI-compatible endpoint.
 
-import { config, isMock } from '../config.js';
-import { api, localId } from './apiClient.js';
+import { config } from '../config.js';
+import { localId, postStream } from './apiClient.js';
 import { getState, setState, updateSlice, selectAccount, selectValuation, selectDayChange, LIMITS } from '../state.js';
-import { buildMockReply } from '../data/mockTutorResponses.js';
+import { buildMockReply, matchTopic } from '../data/mockTutorResponses.js';
 import { dateOfDay } from './marketDataService.js';
 
 export const MAX_MESSAGE_LENGTH = 1000;
@@ -63,22 +57,55 @@ const mock = {
 };
 
 const remote = {
-  async reply({ messages, level, pageContext, signal }) {
-    const response = await api.post(
+  async reply({ messages, level, pageContext, signal, onChunk = () => {} }) {
+    let source = null;
+    let visibleStreamed = false;
+    const response = await postStream(
       '/tutor/chat',
       {
         messages: messages.slice(-12).map(({ role, content }) => ({ role, content })),
         context: { level, ...pageContext },
+        stream: true,
       },
-      { signal, timeoutMs: config.tutorTimeoutMs },
+      {
+        signal,
+        timeoutMs: config.tutorTimeoutMs,
+        onMeta: (metadata) => {
+          source = metadata.source;
+        },
+        onChunk: (chunk) => {
+          if (source !== 'knowledge_base') {
+            visibleStreamed = true;
+            onChunk(chunk);
+          }
+        },
+      },
     );
-    return { content: response.reply.content, source: response.reply.source || 'llm', model: response.reply.model };
+    if (response.reply.source === 'knowledge_base') {
+      const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+      const topic = matchTopic(lastUser?.content ?? '');
+      if (topic) {
+        const canned = buildMockReply({
+          text: lastUser.content,
+          context: accountContext(getState()),
+          level,
+        });
+        return { content: canned.content, source: 'mock', topic: canned.topic };
+      }
+    }
+    return {
+      content: response.reply.content,
+      source: response.reply.source || 'llm',
+      model: response.reply.model,
+      streamed: response.streamed && visibleStreamed,
+    };
   },
 };
 
-const adapter = isMock() ? mock : remote;
+const adapter = config.tutorApiEnabled ? remote : mock;
 
 let controller = null;
+let discardPendingReply = false;
 
 function setPending(pending) {
   setState((state) => ({ ...state, runtime: { ...state.runtime, tutorPending: pending } }), 'tutor/pending');
@@ -93,20 +120,22 @@ function appendMessage(message) {
 }
 
 export function isPreviewMode() {
-  return isMock();
+  return !config.tutorApiEnabled;
 }
 
 /**
  * Sends a learner message and appends the tutor's reply.
- * `pageContext` ({ route, lessonId? }) is forwarded to the backend in api mode.
+ * `pageContext` ({ route, lessonId? }) is forwarded to the backend when enabled.
  */
-export async function sendMessage(text, pageContext = {}) {
+export async function sendMessage(text, pageContext = {}, onChunk = () => {}) {
   const content = String(text ?? '').trim().slice(0, MAX_MESSAGE_LENGTH);
   if (!content || getState().runtime.tutorPending) return null;
 
   appendMessage({ id: localId('msg'), role: 'user', content, createdAt: Date.now() });
   setPending(true);
   controller = new AbortController();
+  discardPendingReply = false;
+  let streamedContent = '';
 
   try {
     const reply = await adapter.reply({
@@ -114,18 +143,47 @@ export async function sendMessage(text, pageContext = {}) {
       level: getState().preferences.difficulty,
       pageContext,
       signal: controller.signal,
+      onChunk: (chunk) => {
+        streamedContent += chunk;
+        onChunk(chunk);
+      },
     });
     const message = {
       id: localId('msg'),
       role: 'assistant',
       content: reply.content,
       createdAt: Date.now(),
-      meta: { source: reply.source, topic: reply.topic ?? null, model: reply.model ?? null },
+      meta: {
+        source: reply.source,
+        topic: reply.topic ?? null,
+        model: reply.model ?? null,
+        streamed: reply.streamed ?? false,
+      },
     };
     appendMessage(message);
     return message;
   } catch (error) {
-    if (error?.name === 'AbortError') return null;
+    if (discardPendingReply) return null;
+    if (streamedContent) {
+      const partial = {
+        id: localId('msg'),
+        role: 'assistant',
+        content: streamedContent,
+        createdAt: Date.now(),
+        meta: {
+          source: 'llm',
+          streamed: true,
+          interrupted: true,
+          stopped: error?.name === 'AbortError',
+          reason: error?.code || null,
+          details: error?.details || null,
+        },
+      };
+      appendMessage(partial);
+      if (error?.name === 'AbortError') return partial;
+    } else if (error?.name === 'AbortError') {
+      return null;
+    }
     const message = {
       id: localId('msg'),
       role: 'assistant',
@@ -137,16 +195,18 @@ export async function sendMessage(text, pageContext = {}) {
     return message;
   } finally {
     controller = null;
+    discardPendingReply = false;
     setPending(false);
   }
 }
 
 /** Stops waiting for a reply (used when clearing the conversation). */
-export function cancelPending() {
+export function cancelPending(discardReply = false) {
+  discardPendingReply = discardReply;
   controller?.abort();
 }
 
 export function clearConversation() {
-  cancelPending();
+  cancelPending(true);
   updateSlice('tutor', (tutor) => ({ ...tutor, messages: [] }), 'tutor/cleared');
 }

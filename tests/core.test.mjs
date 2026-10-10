@@ -3,6 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { deriveAccount, valueAccount, dayChange, equityCurve, allocation } from '../js/core/portfolio.js';
 import { previewOrder, executeMarketOrder, parseQuantity } from '../js/core/orders.js';
@@ -194,4 +195,15 @@ test('markdown renderer escapes HTML and only links inside the app', () => {
   assert.equal(markdownToHTML('**Risk** is *not* `optional`'), '<p><strong>Risk</strong> is <em>not</em> <code>optional</code></p>');
   assert.equal(markdownToHTML('2 * 3 * 4'), '<p>2 * 3 * 4</p>');
   assert.equal(markdownToHTML('## Summary\n- one\n- two'), '<h3>Summary</h3><ul><li>one</li><li>two</li></ul>');
+});
+
+test('homepage and tutor UI expose TradeLab branding', () => {
+  const home = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const tutorPage = readFileSync(new URL('../js/pages/tutor.js', import.meta.url), 'utf8');
+
+  assert.match(home, /<title>TradeLab<\/title>/);
+  assert.match(home, /Loading TradeLab/);
+  assert.match(tutorPage, /TradeLab's AI tutor/);
+  assert.doesNotMatch(home, /InvestIQ/);
+  assert.doesNotMatch(tutorPage, /InvestIQ/);
 });

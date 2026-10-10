@@ -28,6 +28,7 @@ export function markdownToHTML(source) {
   const out = [];
   let paragraph = [];
   let list = null;
+  let codeBlock = null;
 
   const flushParagraph = () => {
     if (paragraph.length) {
@@ -46,6 +47,23 @@ export function markdownToHTML(source) {
 
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
+    if (codeBlock) {
+      if (/^\s*```/.test(line)) {
+        out.push(`<pre><code>${escapeHTML(codeBlock.join('\n'))}</code></pre>`);
+        codeBlock = null;
+      } else {
+        codeBlock.push(rawLine);
+      }
+      continue;
+    }
+
+    if (/^\s*```/.test(line)) {
+      flushParagraph();
+      flushList();
+      codeBlock = [];
+      continue;
+    }
+
     if (!line.trim()) {
       flushParagraph();
       flushList();
@@ -94,5 +112,6 @@ export function markdownToHTML(source) {
 
   flushParagraph();
   flushList();
+  if (codeBlock) out.push(`<pre><code>${escapeHTML(codeBlock.join('\n'))}</code></pre>`);
   return out.join('');
 }

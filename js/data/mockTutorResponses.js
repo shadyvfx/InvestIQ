@@ -4,8 +4,8 @@
 // by keywords, and a prewritten explanation is returned. Two topics ("my last
 // trade" and "my portfolio") fill in numbers from the user's simulated account.
 //
-// When the Flask + llama.cpp backend exists, services/tutorService.js sends
-// messages to it instead and this file is no longer used.
+// When config.tutorApiEnabled is true, services/tutorService.js sends chat to
+// the local Flask + llama.cpp backend instead.
 
 import { money, percent, plural, formatDate } from '../utils/format.js';
 
@@ -38,7 +38,7 @@ The lesson ${lessonLink('position-sizing', 'Position Sizing and Risk-to-Reward')
 - **Generated prices.** The eight stocks and the index fund are fictional. Their prices come from a seeded model that runs in your browser, so they don't track any real company or market.
 - **You control time.** Prices only change when you advance the simulated market with the **Advance 1 day** or **Advance 1 week** buttons. That lets you see how a decision plays out without waiting.
 
-And I'm a preview too: I answer from a set of prewritten explanations. A locally hosted language model is planned to replace this mode.`,
+And I'm a preview too: I answer from a set of prewritten explanations. You can switch to the locally hosted language model by enabling the tutor API.`,
   },
   {
     id: 'last-trade',
