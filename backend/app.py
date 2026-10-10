@@ -2,8 +2,12 @@
 
 import json
 import mimetypes
+import os
 import re
+import threading
+from functools import wraps
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 import requests
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
@@ -15,12 +19,36 @@ from backend.knowledge_base import (
     retrieve_relevant,
     tokenize,
 )
+from server.accounts import MAX_USER_DATA_BYTES, AccountError, AccountStore, DatabaseSetupError
+from server.accounts import GUEST_SESSION_DAYS
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SYSTEM_PROMPT_PATH = PROJECT_ROOT / "ai_system_prompt.txt"
+LESSON_CONTENT_PATH = PROJECT_ROOT / "server" / "lesson_content.json"
+DATABASE_PATH = os.path.abspath(os.environ.get("TRADELAB_DB") or PROJECT_ROOT / "tradelab.db")
 LLAMA_URL = "http://127.0.0.1:8080/v1/chat/completions"
 MODEL_LABEL = "Qwen3-8B Q4_K_M"
+SESSION_COOKIE = "tradelab_session"
+GUEST_SESSION_COOKIE = "tradelab_guest"
+GUEST_START_DAY = 15
+GUEST_COURSE_IDS = frozenset({"what-is-a-stock", "how-prices-move", "market-vs-limit-orders"})
+LESSON_IDS = frozenset(
+    {
+        "what-is-a-stock",
+        "how-prices-move",
+        "candlestick-anatomy",
+        "candlestick-patterns",
+        "market-vs-limit-orders",
+        "moving-averages",
+        "rsi-momentum",
+        "position-sizing",
+        "diversification-basics",
+        "trading-psychology",
+    }
+)
+MAX_TUTOR_REQUEST_BYTES = 64 * 1024
+ACCOUNT_STORE_LOCK = threading.Lock()
 MAX_MESSAGE_LENGTH = 1000
 MAX_ASSISTANT_MESSAGE_LENGTH = 4000
 MAX_MESSAGES = 12
@@ -98,13 +126,122 @@ FOLLOW_UP_GENERIC_TERMS = {
 mimetypes.add_type("text/javascript", ".js")
 
 app = Flask(__name__, static_folder=None)
-app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+app.config["MAX_CONTENT_LENGTH"] = MAX_USER_DATA_BYTES + 1024
 
 
 @app.after_request
 def ensure_api_utf8_charset(response):
     if response.mimetype in {"application/json", "text/event-stream"}:
         response.headers["Content-Type"] = f"{response.mimetype}; charset=utf-8"
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+def account_store():
+    store = app.config.get("ACCOUNT_STORE")
+    if store is not None:
+        return store
+
+    with ACCOUNT_STORE_LOCK:
+        store = app.config.get("ACCOUNT_STORE")
+        if store is None:
+            store = AccountStore(DATABASE_PATH)
+            notes = store.migrate()
+            for note in notes:
+                app.logger.info("%s", note)
+            app.config["ACCOUNT_STORE"] = store
+    return store
+
+
+def account_api(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        try:
+            return view(*args, **kwargs)
+        except AccountError as error:
+            return jsonify(error=error.to_dict()), error.status
+        except DatabaseSetupError:
+            app.logger.exception("The TradeLab account database could not be initialized.")
+            return api_error(
+                500,
+                "database_setup_error",
+                "The TradeLab account database could not be initialized. Check its terminal for details.",
+            )
+        except Exception:
+            app.logger.exception("Unexpected error handling account endpoint %s.", request.path)
+            return api_error(
+                500,
+                "server_error",
+                "Something went wrong on the TradeLab server. Check its terminal for details.",
+            )
+
+    return wrapped
+
+
+def account_json():
+    if not request.is_json:
+        raise AccountError(415, "unsupported_media_type", "Send the request body as JSON.")
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        raise AccountError(400, "invalid_request", "The request body must be a valid JSON object.")
+    return body
+
+
+def check_account_origin():
+    origin = request.headers.get("Origin")
+    if origin is None:
+        return
+    try:
+        origin_host = urlsplit(origin).netloc
+    except ValueError:
+        origin_host = ""
+    if not origin_host or origin_host != request.host:
+        raise AccountError(403, "forbidden_origin", "Requests from other websites aren't allowed.")
+
+
+def signed_in_user():
+    user = account_store().user_for_session(request.cookies.get(SESSION_COOKIE))
+    if user is None:
+        raise AccountError(401, "not_signed_in", "Sign in to save progress to your account.")
+    return user
+
+
+def current_user():
+    return account_store().user_for_session(request.cookies.get(SESSION_COOKIE))
+
+
+def guest_session_token():
+    token = request.cookies.get(GUEST_SESSION_COOKIE)
+    limits = account_store().guest_session_limits(token)
+    if limits is None:
+        raise AccountError(401, "guest_session_required", "Refresh the page to start a guest session.")
+    return token, limits
+
+
+def set_guest_cookie(response, token):
+    response.set_cookie(
+        GUEST_SESSION_COOKIE,
+        token,
+        max_age=GUEST_SESSION_DAYS * 24 * 60 * 60,
+        httponly=True,
+        secure=request.is_secure,
+        samesite="Lax",
+        path="/",
+    )
+    return response
+
+
+def session_cookie(response, token):
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=account_store().session_days * 24 * 60 * 60,
+        httponly=True,
+        secure=request.is_secure,
+        samesite="Lax",
+        path="/",
+    )
     return response
 
 
@@ -345,8 +482,172 @@ def frontend_file(filename):
     return send_from_directory(PROJECT_ROOT, filename, max_age=0)
 
 
+@app.post("/api/users")
+@account_api
+def create_user():
+    check_account_origin()
+    body = account_json()
+    store = account_store()
+    user = store.create_user(body.get("username"), body.get("email"), body.get("password"))
+    token = store.create_session(user["id"])
+    return session_cookie(jsonify(user=user), token), 201
+
+
+@app.get("/api/session")
+@account_api
+def get_session():
+    store = account_store()
+    user = store.user_for_session(request.cookies.get(SESSION_COOKIE))
+    if user:
+        return jsonify(user=user, guestLimits=None)
+    token, limits, created = store.ensure_guest_session(request.cookies.get(GUEST_SESSION_COOKIE))
+    response = jsonify(user=None, guestLimits=limits)
+    return set_guest_cookie(response, token) if created else response
+
+
+@app.post("/api/session")
+@account_api
+def sign_in():
+    check_account_origin()
+    body = account_json()
+    store = account_store()
+    user = store.authenticate(body.get("login"), body.get("password"))
+    token = store.create_session(user["id"])
+    return session_cookie(jsonify(user=user), token)
+
+
+@app.delete("/api/session")
+@account_api
+def sign_out():
+    check_account_origin()
+    account_store().delete_session(request.cookies.get(SESSION_COOKIE))
+    response = app.response_class(status=204)
+    response.delete_cookie(SESSION_COOKIE, path="/", httponly=True, samesite="Lax")
+    return response
+
+
+@app.post("/api/email-check")
+@account_api
+def check_email():
+    check_account_origin()
+    body = account_json()
+    return jsonify(account_store().check_email(body.get("email")).to_dict())
+
+
+@app.get("/api/me/data")
+@account_api
+def get_user_data():
+    user = signed_in_user()
+    data, updated_at = account_store().load_user_data(user["id"])
+    return jsonify(data=data, updatedAt=updated_at)
+
+
+@app.put("/api/me/data")
+@account_api
+def put_user_data():
+    check_account_origin()
+    user = signed_in_user()
+    body = account_json()
+    if request.content_length and request.content_length > MAX_USER_DATA_BYTES + 1024:
+        raise AccountError(413, "payload_too_large", "That request is too large.")
+    updated_at = account_store().save_user_data(user["id"], body.get("data"))
+    return jsonify(updatedAt=updated_at)
+
+
+@app.get("/api/guest/limits")
+@account_api
+def get_guest_limits():
+    if current_user():
+        return jsonify(authenticated=True, limits=None)
+    token, limits, created = account_store().ensure_guest_session(request.cookies.get(GUEST_SESSION_COOKIE))
+    response = jsonify(authenticated=False, limits=limits)
+    return set_guest_cookie(response, token) if created else response
+
+
+@app.post("/api/guest/simulation/advance")
+@account_api
+def advance_guest_simulation():
+    check_account_origin()
+    if current_user():
+        return jsonify(authenticated=True)
+    body = account_json()
+    token, _limits = guest_session_token()
+    granted, limits = account_store().reserve_guest_simulation_days(token, body.get("days"))
+    if granted == 0:
+        return api_error(
+            403,
+            "guest_simulation_limit",
+            "You've reached the guest simulation limit. Create an account to continue using TradeLab.",
+        )
+    return jsonify(
+        authenticated=False,
+        grantedDays=granted,
+        limitReached=limits["simulationDaysRemaining"] == 0,
+        limits=limits,
+    )
+
+
+@app.post("/api/guest/journal/entries")
+@account_api
+def create_guest_journal_entry():
+    check_account_origin()
+    if current_user():
+        return jsonify(authenticated=True)
+    token, _limits = guest_session_token()
+    limits = account_store().reserve_guest_journal_entry(token)
+    if limits is None:
+        return api_error(
+            403,
+            "guest_journal_limit",
+            "You've reached the guest journal limit. Create an account to add more entries.",
+        )
+    return jsonify(authenticated=False, limits=limits)
+
+
+@app.get("/api/lessons/<lesson_id>/access")
+@account_api
+def check_lesson_access(lesson_id):
+    if lesson_id not in LESSON_IDS:
+        return api_error(404, "lesson_not_found", "That lesson doesn't exist.")
+    if current_user() or lesson_id in GUEST_COURSE_IDS:
+        return jsonify(allowed=True, lessonId=lesson_id)
+    return api_error(
+        403,
+        "course_account_required",
+        "This course requires an account. Sign up to unlock more learning content.",
+    )
+
+
+@app.get("/api/lessons/<lesson_id>")
+@account_api
+def get_lesson_content(lesson_id):
+    if lesson_id not in LESSON_IDS:
+        return api_error(404, "lesson_not_found", "That lesson doesn't exist.")
+    if not current_user() and lesson_id not in GUEST_COURSE_IDS:
+        return api_error(
+            403,
+            "course_account_required",
+            "This course requires an account. Sign up to unlock more learning content.",
+        )
+    try:
+        lesson_data = json.loads(LESSON_CONTENT_PATH.read_text(encoding="utf-8"))
+        lesson = next((item for item in lesson_data["lessons"] if item["id"] == lesson_id), None)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        app.logger.exception("Course content could not be loaded for lesson %s.", lesson_id)
+        return api_error(500, "lesson_content_unavailable", "Course content could not be loaded.")
+    if lesson is None:
+        app.logger.error("Course content is missing for configured lesson %s.", lesson_id)
+        return api_error(500, "lesson_content_unavailable", "Course content could not be loaded.")
+    return jsonify(lesson=lesson)
+
+
 @app.post("/api/tutor/chat")
 def tutor_chat():
+    user = account_store().user_for_session(request.cookies.get(SESSION_COOKIE))
+    if user is None:
+        return api_error(401, "account_required", "You'll need to sign in to access TraderLab Tutor.")
+    if request.content_length and request.content_length > MAX_TUTOR_REQUEST_BYTES:
+        return api_error(413, "request_too_large", "The tutor request is too large.")
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return api_error(400, "invalid_request", "Send a valid JSON object.", "messages")

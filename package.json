@@ -8,7 +8,7 @@
     "dev": "node scripts/dev-server.mjs",
     "start": "node scripts/dev-server.mjs",
     "server": "python3 scripts/dev_server.py",
-    "test": "node --test tests/core.test.mjs tests/tutor-mock.test.mjs tests/tutor-local-api.test.mjs tests/tutor-stream.test.mjs tests/typewriter.test.mjs",
+    "test": "node --test tests/core.test.mjs tests/guest-limits.test.mjs tests/tutor-mock.test.mjs tests/tutor-local-api.test.mjs tests/tutor-stream.test.mjs tests/typewriter.test.mjs",
     "test:server": "python3 -m unittest discover -s tests -v"
   },
   "engines": {

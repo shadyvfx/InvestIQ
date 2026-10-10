@@ -13,6 +13,8 @@ import { toast, notify, announce } from '../components/notifications.js';
 import { catalog, markSectionComplete, submitQuiz, progressFor, nextLesson } from '../services/progressService.js';
 import { gradeQuiz, PASS_RATIO } from '../core/progress.js';
 import { href } from '../router.js';
+import { api, ApiError } from '../services/apiClient.js';
+import { accountLinks } from '../components/accountGate.js';
 
 const CALLOUT_ICONS = { tip: 'bulb', key: 'key', warn: 'alert' };
 
@@ -36,11 +38,8 @@ function renderBlock(block) {
   }
 }
 
-export default {
-  id: 'lesson',
-  mount(root, { params, query, setTitle }) {
+function mountLesson(root, { params, query, setTitle }, lesson) {
     const disposer = createDisposer();
-    const lesson = catalog.getLesson(params.lessonId);
 
     if (!lesson) {
       setTitle('Lesson not found', [{ label: 'Learn', href: '#/learn' }]);
@@ -321,7 +320,7 @@ export default {
         if (!allChecked) return;
         try {
           const local = gradeQuiz(lesson.quiz, quiz.answers);
-          const result = await submitQuiz(lesson.id, quiz.answers);
+          const result = await submitQuiz(lesson.id, quiz.answers, lesson);
           quiz.grade = result.grade || local;
           quiz.completedNow = result.completedNow;
           if (result.completedNow) {
@@ -355,5 +354,51 @@ export default {
     );
 
     return () => disposer.dispose();
+}
+
+export default {
+  id: 'lesson',
+  mount(root, ctx) {
+    const metadata = catalog.getLesson(ctx.params.lessonId);
+    if (!metadata) return mountLesson(root, ctx, null);
+
+    ctx.setTitle(metadata.title, [{ label: 'Learn', href: '#/learn' }]);
+    render(root, html`<div class="page"><section class="panel panel__body stack">
+      <p class="muted" role="status">Checking course access…</p>
+    </section></div>`);
+
+    let cancelled = false;
+    let innerCleanup = null;
+    api.get(`/lessons/${encodeURIComponent(metadata.id)}`).then(
+      ({ lesson }) => {
+        if (!cancelled) innerCleanup = mountLesson(root, ctx, lesson);
+      },
+      (error) => {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status === 403) {
+          ctx.setTitle('Course locked', [{ label: 'Learn', href: '#/learn' }]);
+          render(root, html`<div class="page"><section class="panel panel__body stack">
+            <span class="pill">Account required</span>
+            <h2 class="panel__title">${metadata.title}</h2>
+            <p role="status">This course requires an account. Sign up to unlock more learning content.</p>
+            ${accountLinks(`/learn/${metadata.id}`)}
+            <a class="link" href="#/learn">Back to all lessons</a>
+          </section></div>`);
+        } else if (error instanceof ApiError && error.status === 404) {
+          innerCleanup = mountLesson(root, ctx, null);
+        } else {
+          ctx.setTitle('Course access unavailable', [{ label: 'Learn', href: '#/learn' }]);
+          render(root, html`<div class="page"><section class="panel panel__body stack">
+            <h2 class="panel__title">Couldn't verify course access</h2>
+            <p role="alert">${error.message || 'Check your connection to the TradeLab server, then try again.'}</p>
+            <a class="btn btn--secondary" href="#/learn">Back to lessons</a>
+          </section></div>`);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+      innerCleanup?.();
+    };
   },
 };

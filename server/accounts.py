@@ -37,6 +37,9 @@ EMAIL_LOCAL_MAX = 64
 
 DEFAULT_ITERATIONS = 1_000_000
 SESSION_DAYS = 7
+GUEST_SESSION_DAYS = 365
+GUEST_SIMULATION_DAYS = 21
+GUEST_JOURNAL_ENTRIES = 2
 SALT_CHARS = string.ascii_letters + string.digits
 
 # Exactly the characters JavaScript's \s matches, so the browser and the
@@ -329,6 +332,15 @@ class AccountStore:
                 )"""
             )
             connection.execute("CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id)")
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS guest_sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    simulation_days INTEGER NOT NULL DEFAULT 0,
+                    journal_creations INTEGER NOT NULL DEFAULT 0
+                )"""
+            )
             has_user_data = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_data'"
             ).fetchone()
@@ -347,6 +359,104 @@ class AccountStore:
     def count_users(self) -> int:
         with closing(self._connect()) as connection:
             return connection.execute("SELECT count(*) FROM users").fetchone()[0]
+
+    @staticmethod
+    def _guest_limits(row) -> dict:
+        simulation_days = row["simulation_days"]
+        journal_creations = row["journal_creations"]
+        return {
+            "simulationDaysUsed": simulation_days,
+            "simulationDaysRemaining": max(0, GUEST_SIMULATION_DAYS - simulation_days),
+            "simulationDay": 15 + simulation_days,
+            "journalEntriesCreated": journal_creations,
+            "journalEntriesRemaining": max(0, GUEST_JOURNAL_ENTRIES - journal_creations),
+        }
+
+    def ensure_guest_session(self, token: str | None) -> tuple[str, dict, bool]:
+        """Returns a valid opaque guest token, its server-owned limits, and whether it was created."""
+        now = _now()
+        with closing(self._connect()) as connection, connection:
+            if token:
+                row = connection.execute(
+                    "SELECT * FROM guest_sessions WHERE token_hash = ? AND expires_at > ?",
+                    (_token_hash(token), _timestamp(now)),
+                ).fetchone()
+                if row:
+                    return token, self._guest_limits(row), False
+
+            guest_token = secrets.token_urlsafe(32)
+            connection.execute("DELETE FROM guest_sessions WHERE expires_at <= ?", (_timestamp(now),))
+            connection.execute(
+                """INSERT INTO guest_sessions (token_hash, created_at, expires_at)
+                   VALUES (?, ?, ?)""",
+                (
+                    _token_hash(guest_token),
+                    _timestamp(now),
+                    _timestamp(now + timedelta(days=GUEST_SESSION_DAYS)),
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM guest_sessions WHERE token_hash = ?",
+                (_token_hash(guest_token),),
+            ).fetchone()
+        return guest_token, self._guest_limits(row), True
+
+    def guest_session_limits(self, token: str | None) -> dict | None:
+        if not token:
+            return None
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT * FROM guest_sessions WHERE token_hash = ? AND expires_at > ?",
+                (_token_hash(token), _timestamp(_now())),
+            ).fetchone()
+        return self._guest_limits(row) if row else None
+
+    def reserve_guest_simulation_days(self, token: str | None, days: int) -> tuple[int, dict]:
+        if type(days) is not int or days not in (1, 5):
+            raise AccountError(400, "invalid_request", "Advance the simulation by one day or one week.")
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM guest_sessions WHERE token_hash = ? AND expires_at > ?",
+                (_token_hash(token), _timestamp(_now())) if token else ("", _timestamp(_now())),
+            ).fetchone()
+            if row is None:
+                raise AccountError(401, "guest_session_required", "Refresh the page before advancing the guest simulation.")
+            previous = row["simulation_days"]
+            granted = min(days, max(0, GUEST_SIMULATION_DAYS - previous))
+            if granted:
+                connection.execute(
+                    "UPDATE guest_sessions SET simulation_days = simulation_days + ? WHERE token_hash = ?",
+                    (granted, _token_hash(token)),
+                )
+            updated = connection.execute(
+                "SELECT * FROM guest_sessions WHERE token_hash = ?",
+                (_token_hash(token),),
+            ).fetchone()
+        return granted, self._guest_limits(updated)
+
+    def reserve_guest_journal_entry(self, token: str | None) -> dict | None:
+        """Consumes one lifetime guest creation slot; deletion never refunds it."""
+        with closing(self._connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            token_hash = _token_hash(token) if token else ""
+            row = connection.execute(
+                "SELECT * FROM guest_sessions WHERE token_hash = ? AND expires_at > ?",
+                (token_hash, _timestamp(_now())),
+            ).fetchone()
+            if row is None:
+                raise AccountError(401, "guest_session_required", "Refresh the page before creating a guest journal entry.")
+            if row["journal_creations"] >= GUEST_JOURNAL_ENTRIES:
+                return None
+            connection.execute(
+                "UPDATE guest_sessions SET journal_creations = journal_creations + 1 WHERE token_hash = ?",
+                (token_hash,),
+            )
+            updated = connection.execute(
+                "SELECT * FROM guest_sessions WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+        return self._guest_limits(updated)
 
     @staticmethod
     def _public(row) -> dict:

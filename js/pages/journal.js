@@ -7,13 +7,15 @@ import { money, percent, formatDate, relativeTime, plural } from '../utils/forma
 import { icon } from '../components/icons.js';
 import { change, exampleTag, emptyState, segmented, fieldError } from '../components/ui.js';
 import { openDialog, confirmDialog } from '../components/modals.js';
+import { accountLinks, showAccountGate } from '../components/accountGate.js';
 import { toast } from '../components/notifications.js';
-import { createEntry, updateEntry, deleteEntry, entryById, ValidationError } from '../services/journalService.js';
+import { createEntry, updateEntry, deleteEntry, entryById, ValidationError, GuestLimitError } from '../services/journalService.js';
 import { transactionById } from '../services/tradingService.js';
 import { dateOfDay } from '../services/marketDataService.js';
 import { entryMetrics, journalStats, MIN_CLOSED_FOR_OUTCOMES, PLAN_LABELS, TEXT_LIMIT } from '../core/journal.js';
 
 const ui = { filter: 'all' };
+let pendingDraft = null;
 
 const rate = (value) => (value === null ? '–' : percent(value, { digits: 0 }));
 
@@ -253,6 +255,14 @@ async function openEditor({ entry = null, prefill = {} } = {}) {
             render(body, editorForm(values, error.errors, instruments));
             const first = Object.keys(error.errors)[0];
             body.querySelector(`#je-${first}`)?.focus();
+          } else if (error instanceof GuestLimitError) {
+            pendingDraft = values;
+            close(null);
+            showAccountGate({
+              title: 'Guest journal limit reached',
+              message: "You've reached the guest journal limit. Create an account to add more entries. Your draft will reopen after you sign in.",
+              returnTo: '/journal?new=1',
+            });
           } else {
             toast({ title: 'The entry could not be saved', body: error.message, tone: 'error' });
           }
@@ -279,6 +289,7 @@ export default {
   id: 'journal',
   mount(root, { query }) {
     const disposer = createDisposer();
+    const guest = getState().runtime.userStatus !== 'signed-in';
     render(
       root,
       html`<div class="page journal">
@@ -286,6 +297,7 @@ export default {
           <div class="page-intro__text">
             <h2 class="page-intro__title">Write down the why</h2>
             <p>Record the reasoning behind each simulated trade, then review it once the trade is over. TradeLab scores planning and consistency first, and only shows outcome numbers once there are enough closed trades.</p>
+            <div id="journal-guest-allowance"></div>
           </div>
           <button type="button" class="btn btn--primary" data-action="new-entry">${icon('plus')}New entry</button>
         </div>
@@ -297,12 +309,36 @@ export default {
       </div>`,
     );
 
+    const paintGuestAllowance = () => {
+      if (!guest) return;
+      const remaining = getState().runtime.guestLimits?.journalEntriesRemaining;
+      render(
+        $('#journal-guest-allowance', root),
+        html`<p class="small muted">Guest allowance: ${Number.isInteger(remaining) ? `${remaining} of 2 entries available` : '2 entries available'}. Deleting an entry does not restore an allowance.</p>
+          ${remaining === 0
+            ? html`<div class="callout callout--warn" role="status"><div>
+                <p class="callout__title">You've reached the guest journal limit. Create an account to add more entries.</p>
+                ${accountLinks(pendingDraft ? '/journal?new=1' : '/journal')}
+              </div></div>`
+            : ''}`,
+      );
+    };
+    paintGuestAllowance();
+
     const paintInsights = () => render($('#journal-insights', root), insights(getState()));
     const paintEntries = () => render($('#journal-entries', root), entriesPanel(getState()));
     paintInsights();
     paintEntries();
 
     const startNew = async (prefill = {}) => {
+      if (guest && getState().runtime.guestLimits?.journalEntriesRemaining === 0) {
+        await showAccountGate({
+          title: 'Guest journal limit reached',
+          message: "You've reached the guest journal limit. Create an account to add more entries.",
+          returnTo: '/journal',
+        });
+        return;
+      }
       const saved = await openEditor({ prefill });
       clearQuery();
       if (saved) toast({ title: 'Journal entry saved', body: `${saved.symbol}: ${saved.exitPrice ? 'closed' : 'open'} entry added.`, tone: 'success' });
@@ -344,6 +380,7 @@ export default {
       }),
     );
 
+    disposer.add(watch((state) => state.runtime.guestLimits, paintGuestAllowance));
     disposer.add(watch((state) => state.journal, () => {
       paintInsights();
       paintEntries();
@@ -357,7 +394,8 @@ export default {
         ? { symbol: tx.symbol, entryPrice: tx.price, quantity: tx.quantity, transactionId: tx.id }
         : query.symbol
           ? { symbol: String(query.symbol).toUpperCase() }
-          : {};
+          : pendingDraft || {};
+      pendingDraft = null;
       queueMicrotask(() => startNew(prefill));
     }
 

@@ -27,14 +27,19 @@ globalThis.fetch = async (url, options) => {
 const { config, isMock } = await import('../js/config.js');
 const { initMarket } = await import('../js/services/marketDataService.js');
 const { cancelPending, sendMessage } = await import('../js/services/tutorService.js');
-const { getState, initStore } = await import('../js/state.js');
+const { getState, initStore, setState } = await import('../js/state.js');
+
+function signInTestUser() {
+  initStore();
+  setState((state) => ({ ...state, runtime: { ...state.runtime, userStatus: 'signed-in' } }), 'test/sign-in');
+}
 
 test('the local tutor uses Flask while market features stay in mock mode', async () => {
   assert.equal(config.dataSource, 'mock');
   assert.equal(config.tutorApiEnabled, true);
   assert.equal(isMock(), true);
 
-  initStore();
+  signInTestUser();
   await initMarket();
   assert.equal(getState().runtime.marketStatus, 'ready');
   assert.equal(requests.length, 0);
@@ -78,6 +83,18 @@ test('the local tutor uses Flask while market features stay in mock mode', async
   assert.equal(requests.length, SUGGESTED_QUESTIONS.length + 2);
 });
 
+test('guest tutor requests are stopped before reaching Flask', async () => {
+  initStore();
+  const requestCount = requests.length;
+
+  await assert.rejects(
+    sendMessage('Explain candlestick charts to me.'),
+    (error) => error.message === "You'll need to sign in to access TraderLab Tutor.",
+  );
+  assert.equal(requests.length, requestCount);
+  assert.equal(getState().tutor.messages.length, 0);
+});
+
 test('stopping a streamed tutor reply retains only the received partial answer', async () => {
   const encoder = new TextEncoder();
   globalThis.fetch = async (_url, { signal }) => new Response(
@@ -94,7 +111,7 @@ test('stopping a streamed tutor reply retains only the received partial answer',
     }),
     { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
   );
-  initStore();
+  signInTestUser();
 
   const pendingReply = sendMessage('Explain diversification.');
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -115,7 +132,7 @@ test('output-token limit keeps the partial streamed answer with an interrupted m
     ].join(''),
     { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
   );
-  initStore();
+  signInTestUser();
 
   const reply = await sendMessage('Explain limit orders with a table.');
 

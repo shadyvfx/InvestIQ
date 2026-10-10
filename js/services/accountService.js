@@ -1,11 +1,12 @@
 // TradeLab accounts: sign-up, sign-in, sign-out, the email checker, and saving
 // each account's progress.
 //
-// Accounts always go to the TradeLab server (python3 scripts/dev_server.py),
-// which saves them in the SQLite user database (tradelab.db), even while the
-// rest of the app runs on mock data. The server checks the rules again,
-// checks that the email's domain can receive mail, hashes the password and
-// signs the browser in with an HttpOnly cookie.
+// Accounts always go to the TradeLab server, which saves them in the SQLite
+// user database (tradelab.db), even while the rest of the app runs on mock
+// data. The Flask server can also provide the tutor API from the same origin.
+// The server checks the rules again, checks that the email's domain can
+// receive mail, hashes the password and signs the browser in with an
+// HttpOnly cookie.
 //
 // Progress belongs to whoever is using TradeLab. Signed in, the store holds
 // that account's lessons, simulated trades, journal, tutor conversation and
@@ -24,12 +25,12 @@
 
 import { isMock } from '../config.js';
 import { api, ApiError } from './apiClient.js';
-import { getState, setState, getOwner, switchOwner, personalSnapshot, readGuestData, resetGuestData } from '../state.js';
+import { getState, setState, updateSlice, getOwner, switchOwner, personalSnapshot, readGuestData, resetGuestData } from '../state.js';
 import { validateRegistration, validateSignIn } from '../core/accounts.js';
 import { refreshQuotes } from './marketDataService.js';
 import { cancelPending } from './tutorService.js';
 
-export const SERVER_COMMAND = 'python3 scripts/dev_server.py';
+export const SERVER_COMMAND = 'python -m flask --app backend.app run --host 127.0.0.1 --port 5000';
 
 export class AccountError extends Error {
   /**
@@ -54,6 +55,10 @@ function setSync(patch) {
   setState((state) => ({ ...state, runtime: { ...state.runtime, sync: { ...state.runtime.sync, ...patch } } }), 'account/sync');
 }
 
+export function setGuestLimits(guestLimits) {
+  setState((state) => ({ ...state, runtime: { ...state.runtime, guestLimits } }), 'guest/limits');
+}
+
 /** Tells the app that different data is now showing, so the current page rebuilds. */
 function announceOwnerChange() {
   if (typeof window !== 'undefined' && typeof CustomEvent === 'function') window.dispatchEvent(new CustomEvent('tradelab:owner-changed'));
@@ -71,7 +76,7 @@ function toAccountError(error) {
   if (error instanceof ApiError) {
     if (isUnavailable(error)) {
       setUser(null, 'unavailable');
-      return new AccountError(`Can't reach the account server, so nothing was saved. Start TradeLab with ${SERVER_COMMAND}, then try again.`, {
+      return new AccountError(`Can't reach the account server, so nothing was saved. Run ${SERVER_COMMAND} and open http://127.0.0.1:5000, then try again.`, {
         code: 'accounts_unavailable',
         unavailable: true,
       });
@@ -175,8 +180,16 @@ export async function loadAccountSession() {
     setUser(null, 'unavailable');
     return;
   }
+  setGuestLimits(session.guestLimits || null);
   if (!session.user) {
     setUser(null, 'signed-out');
+    if (session.guestLimits?.simulationDay !== undefined) {
+      updateSlice(
+        'market',
+        (market) => ({ ...market, day: session.guestLimits.simulationDay }),
+        'guest/simulation-clock',
+      );
+    }
     return;
   }
   try {
@@ -186,6 +199,48 @@ export async function loadAccountSession() {
     // this browser's guest data rather than mixing the two.
     setUser(null, 'unavailable');
   }
+}
+
+export async function reserveGuestSimulationDays(days) {
+  try {
+    const result = await api.post('/guest/simulation/advance', { days });
+    if (result.limits) setGuestLimits(result.limits);
+    return result;
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'guest_simulation_limit') {
+      setGuestLimits({ ...(getState().runtime.guestLimits || {}), simulationDaysRemaining: 0 });
+    }
+    throw error;
+  }
+}
+
+export async function reserveGuestJournalEntry() {
+  try {
+    const result = await api.post('/guest/journal/entries', {});
+    if (result.limits) setGuestLimits(result.limits);
+    return result.limits;
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'guest_journal_limit') {
+      setGuestLimits({ ...(getState().runtime.guestLimits || {}), journalEntriesRemaining: 0 });
+    }
+    throw error;
+  }
+}
+
+export async function syncGuestSimulationClock() {
+  const result = await api.get('/guest/limits');
+  if (result.authenticated === false && result.limits) {
+    setGuestLimits(result.limits);
+    if (getState().market.day !== result.limits.simulationDay) {
+      updateSlice(
+        'market',
+        (market) => ({ ...market, day: result.limits.simulationDay }),
+        'guest/simulation-clock',
+      );
+      await refreshQuotes();
+    }
+  }
+  return result;
 }
 
 async function signedIn(user, verb) {

@@ -7,15 +7,18 @@ import { levelBadge, lessonStatus, meter, emptyState } from '../components/ui.js
 import { catalog, overall, progressFor, suggestions } from '../services/progressService.js';
 import { DIFFICULTY_LEVELS, DIFFICULTY_LABELS } from '../core/progress.js';
 import { plural } from '../utils/format.js';
+import { accountLinks } from '../components/accountGate.js';
 
 const filters = { category: 'all', level: 'all', status: 'all' };
+const GUEST_COURSE_IDS = new Set(['what-is-a-stock', 'how-prices-move', 'market-vs-limit-orders']);
 
 function lessonRow(lesson, state) {
+  const locked = state.runtime.userStatus !== 'signed-in' && !GUEST_COURSE_IDS.has(lesson.id);
   const progress = progressFor(lesson.id, state);
   const pct = Math.round(progress.ratio * 100);
   const order = catalog.lessons.indexOf(lesson) + 1;
   const done = progress.status === 'completed';
-  return html`<li class="syllabus__row${done ? ' is-done' : ''}">
+  return html`<li class="syllabus__row${done ? ' is-done' : ''}${locked ? ' is-locked' : ''}">
     <span class="syllabus__num" aria-hidden="true">${done ? icon('check', { size: 14 }) : order}</span>
     <div class="syllabus__main">
       <h3 class="syllabus__title"><a class="syllabus__link" href="#/learn/${lesson.id}" aria-describedby="lesson-${lesson.id}-meta">${lesson.title}</a></h3>
@@ -24,7 +27,7 @@ function lessonRow(lesson, state) {
     <div class="syllabus__meta" id="lesson-${lesson.id}-meta">
       ${levelBadge(lesson.difficulty)}
       <span class="lesson-card__time">${icon('clock', { size: 14 })}${lesson.minutes} min</span>
-      <span class="syllabus__status">${lessonStatus(progress.status)}</span>
+      <span class="syllabus__status">${locked ? html`<span class="pill">Account required</span>` : lessonStatus(progress.status)}</span>
     </div>
     <div class="syllabus__progress">${meter(progress.ratio, `${lesson.title} progress`)}<span class="tiny faint num">${pct}%</span></div>
   </li>`;
@@ -76,13 +79,14 @@ function filterBar() {
 
 function summary(state) {
   const totals = overall(state);
-  const [next] = suggestions(1, state);
+  const guest = state.runtime.userStatus !== 'signed-in';
+  const next = suggestions(catalog.lessons.length, state).find(({ lesson }) => !guest || GUEST_COURSE_IDS.has(lesson.id));
   return html`<section class="learn-summary panel" aria-label="Your learning progress">
     <div class="learn-summary__progress">
       <p class="stat__label">Course progress</p>
       <p class="stat__value figure">${totals.completed} <span class="stat__unit">of ${totals.total} lessons complete</span></p>
       ${meter(totals.ratio, 'Overall course progress')}
-      <p class="stat__sub">${totals.inProgress ? `${plural(totals.inProgress, 'lesson')} in progress. ` : ''}Pass a lesson's knowledge check to complete it.</p>
+      <p class="stat__sub">${guest ? '3 beginner courses available to guests. ' : ''}${totals.inProgress ? `${plural(totals.inProgress, 'lesson')} in progress. ` : ''}Pass a lesson's knowledge check to complete it.</p>
     </div>
     ${next
       ? html`<div class="learn-summary__next">
@@ -91,7 +95,9 @@ function summary(state) {
           <p class="small muted">${catalog.getCategory(next.lesson.categoryId)?.title}, ${next.lesson.minutes} min</p>
           <a class="btn btn--primary btn--sm" href="#/learn/${next.lesson.id}">${next.progress.status === 'in-progress' ? 'Continue lesson' : 'Start lesson'}</a>
         </div>`
-      : html`<div class="learn-summary__next"><p class="stat__label">All done</p><p class="learn-summary__title">You've completed every lesson.</p><a class="btn btn--secondary btn--sm" href="#/practice">Practice what you learned</a></div>`}
+      : guest
+        ? html`<div class="learn-summary__next"><p class="stat__label">Guest courses complete</p><p class="learn-summary__title">You've completed all three guest courses.</p><p class="small muted">Create an account to unlock the rest of the catalog.</p>${accountLinks('/learn')}</div>`
+        : html`<div class="learn-summary__next"><p class="stat__label">All done</p><p class="learn-summary__title">You've completed every lesson.</p><a class="btn btn--secondary btn--sm" href="#/practice">Practice what you learned</a></div>`}
   </section>`;
 }
 

@@ -18,6 +18,7 @@ import { api, simulateLatency } from './apiClient.js';
 import { getState, setState, updateSlice } from '../state.js';
 import { createDayCalendar } from '../core/calendar.js';
 import * as model from '../data/mockMarketData.js';
+import { reserveGuestSimulationDays } from './accountService.js';
 
 export const MARKET_SOURCE = model.MARKET_SOURCE;
 export const RANGES = model.RANGES;
@@ -68,9 +69,16 @@ const mock = {
   async advance(days) {
     await simulateLatency();
     const { day } = getState().market;
-    const next = Math.min(model.MAX_SIM_DAY, day + days);
+    const reservation = await reserveGuestSimulationDays(days);
+    const next = Math.min(
+      model.MAX_SIM_DAY,
+      reservation?.authenticated === false ? reservation.limits.simulationDay : day + (reservation?.grantedDays ?? days),
+    );
     updateSlice('market', (market) => ({ ...market, day: next }), 'market/advanced');
-    return mock.getClock();
+    return {
+      ...(await mock.getClock()),
+      guestLimitReached: reservation?.limitReached ?? false,
+    };
   },
 };
 
@@ -153,5 +161,8 @@ export function dateOfDay(day, startDate = getState().market.startDate) {
 
 export function canAdvance(days = 1) {
   const { market, runtime } = getState();
-  return market.day + days <= (runtime.maxDay ?? model.MAX_SIM_DAY);
+  const withinMarket = market.day + days <= (runtime.maxDay ?? model.MAX_SIM_DAY);
+  if (!withinMarket) return false;
+  if (runtime.userStatus !== 'signed-in' && runtime.guestLimits?.simulationDaysRemaining === 0) return false;
+  return true;
 }

@@ -128,6 +128,9 @@ export function isPreviewMode() {
  * `pageContext` ({ route, lessonId? }) is forwarded to the backend when enabled.
  */
 export async function sendMessage(text, pageContext = {}, onChunk = () => {}) {
+  if (getState().runtime.userStatus !== 'signed-in') {
+    throw new Error("You'll need to sign in to access TraderLab Tutor.");
+  }
   const content = String(text ?? '').trim().slice(0, MAX_MESSAGE_LENGTH);
   if (!content || getState().runtime.tutorPending) return null;
 

@@ -11,6 +11,7 @@ import { confirmDialog } from '../components/modals.js';
 import { sendMessage, clearConversation, cancelPending, isPreviewMode, MAX_MESSAGE_LENGTH } from '../services/tutorService.js';
 import { catalog } from '../services/progressService.js';
 import { SUGGESTED_QUESTIONS } from '../data/mockTutorResponses.js';
+import { accountLinks, TUTOR_ACCOUNT_MESSAGE } from '../components/accountGate.js';
 
 function avatar() {
   return html`<span class="msg__avatar" aria-hidden="true">${logoMark({ className: 'msg__mark' })}</span>`;
@@ -71,6 +72,22 @@ export default {
   id: 'tutor',
   mount(root, { query }) {
     const disposer = createDisposer();
+    if (getState().runtime.userStatus !== 'signed-in') {
+      render(
+        root,
+        html`<div class="page tutor">
+          <section class="panel panel__body stack" aria-labelledby="tutor-locked-title">
+            <span class="pill">Account required</span>
+            <h2 class="panel__title" id="tutor-locked-title">TradeLab Tutor</h2>
+            <p role="status">${TUTOR_ACCOUNT_MESSAGE}</p>
+            ${accountLinks('/tutor')}
+            <a class="link" href="#/learn">Explore the guest courses</a>
+          </section>
+        </div>`,
+      );
+      return () => disposer.dispose();
+    }
+
     render(
       root,
       html`<div class="page tutor">

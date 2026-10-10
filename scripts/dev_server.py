@@ -15,6 +15,9 @@ use another file). There is nothing to install.
     POST   /api/email-check  {email}                       can this address receive email?
     GET    /api/me/data                                    the signed-in account's saved progress
     PUT    /api/me/data      {data}                        save the signed-in account's progress
+    POST   /api/guest/simulation/advance {days}            reserve guest simulation days
+    POST   /api/guest/journal/entries                      reserve a guest journal entry
+    GET    /api/lessons/<lessonId>                         authorized lesson content
 
 Sign-in uses an HttpOnly session cookie. Explicit MIME types are set because
 some Windows machines map .js to text/plain, which stops ES modules from
@@ -35,10 +38,31 @@ from urllib.parse import unquote, urlsplit
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from server.accounts import MAX_USER_DATA_BYTES, AccountError, AccountStore, DatabaseSetupError  # noqa: E402
+from server.accounts import (  # noqa: E402
+    GUEST_SESSION_DAYS,
+    MAX_USER_DATA_BYTES,
+    AccountError,
+    AccountStore,
+    DatabaseSetupError,
+)
 
 SESSION_COOKIE = "tradelab_session"
+GUEST_SESSION_COOKIE = "tradelab_guest"
 MAX_BODY_BYTES = 16 * 1024
+GUEST_COURSE_IDS = {"what-is-a-stock", "how-prices-move", "market-vs-limit-orders"}
+LESSON_IDS = {
+    "what-is-a-stock",
+    "how-prices-move",
+    "candlestick-anatomy",
+    "candlestick-patterns",
+    "market-vs-limit-orders",
+    "moving-averages",
+    "rsi-momentum",
+    "position-sizing",
+    "diversification-basics",
+    "trading-psychology",
+}
+LESSON_CONTENT_PATH = os.path.join(ROOT, "server", "lesson_content.json")
 
 # Never served as static files.
 PRIVATE_FOLDERS = {"server", "__pycache__", "node_modules"}
@@ -122,10 +146,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             ("POST", "/api/email-check"): self._check_email,
             ("GET", "/api/me/data"): self._get_user_data,
             ("PUT", "/api/me/data"): self._put_user_data,
+            ("GET", "/api/guest/limits"): self._get_guest_limits,
+            ("POST", "/api/guest/simulation/advance"): self._advance_guest_simulation,
+            ("POST", "/api/guest/journal/entries"): self._reserve_guest_journal_entry,
         }
         try:
             handler = routes.get((method, path))
+            lesson_route = None
+            if handler is None and method == "GET":
+                parts = path.split("/")
+                if len(parts) == 4 and parts[:3] == ["", "api", "lessons"]:
+                    lesson_route = ("content", parts[3])
+                elif len(parts) == 5 and parts[:3] == ["", "api", "lessons"] and parts[4] == "access":
+                    lesson_route = ("access", parts[3])
             if handler is None:
+                if lesson_route:
+                    self._get_lesson(lesson_route[1], lesson_route[0] == "content")
+                    return
                 if any(route_path == path for _, route_path in routes):
                     raise AccountError(405, "method_not_allowed", f"{method} isn't supported for {path}.")
                 raise AccountError(404, "not_found", "That endpoint doesn't exist on the TradeLab server.")
@@ -148,7 +185,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self._send_json(201, {"user": user}, [("Set-Cookie", self._session_cookie(token))])
 
     def _get_session(self):
-        self._send_json(200, {"user": self.store.user_for_session(self._session_token())})
+        user = self._current_user()
+        if user:
+            self._send_json(200, {"user": user, "guestLimits": None})
+            return
+        token, limits, created = self.store.ensure_guest_session(self._guest_token())
+        headers = [("Set-Cookie", self._guest_session_cookie(token))] if created else []
+        self._send_json(200, {"user": None, "guestLimits": limits}, headers)
 
     def _sign_in(self):
         data = self._read_json()
@@ -166,10 +209,83 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self._send_json(200, self.store.check_email(data.get("email")).to_dict())
 
     def _signed_in_user(self) -> dict:
-        user = self.store.user_for_session(self._session_token())
+        user = self._current_user()
         if user is None:
             raise AccountError(401, "not_signed_in", "Sign in to save progress to your account.")
         return user
+
+    def _current_user(self) -> dict | None:
+        return self.store.user_for_session(self._session_token())
+
+    def _get_guest_limits(self):
+        if self._current_user():
+            self._send_json(200, {"authenticated": True, "limits": None})
+            return
+        token, limits, created = self.store.ensure_guest_session(self._guest_token())
+        headers = [("Set-Cookie", self._guest_session_cookie(token))] if created else []
+        self._send_json(200, {"authenticated": False, "limits": limits}, headers)
+
+    def _advance_guest_simulation(self):
+        if self._current_user():
+            self._send_json(200, {"authenticated": True})
+            return
+        data = self._read_json()
+        token = self._valid_guest_token()
+        granted, limits = self.store.reserve_guest_simulation_days(token, data.get("days"))
+        if granted == 0:
+            raise AccountError(
+                403,
+                "guest_simulation_limit",
+                "You've reached the guest simulation limit. Create an account to continue using TradeLab.",
+            )
+        self._send_json(
+            200,
+            {
+                "authenticated": False,
+                "grantedDays": granted,
+                "limitReached": limits["simulationDaysRemaining"] == 0,
+                "limits": limits,
+            },
+        )
+
+    def _reserve_guest_journal_entry(self):
+        if self._current_user():
+            self._send_json(200, {"authenticated": True})
+            return
+        self._read_json()
+        token = self._valid_guest_token()
+        limits = self.store.reserve_guest_journal_entry(token)
+        if limits is None:
+            raise AccountError(
+                403,
+                "guest_journal_limit",
+                "You've reached the guest journal limit. Create an account to add more entries.",
+            )
+        self._send_json(200, {"authenticated": False, "limits": limits})
+
+    def _get_lesson(self, lesson_id: str, include_content: bool):
+        if lesson_id not in LESSON_IDS:
+            raise AccountError(404, "lesson_not_found", "That lesson doesn't exist.")
+        if not self._current_user() and lesson_id not in GUEST_COURSE_IDS:
+            raise AccountError(
+                403,
+                "course_account_required",
+                "This course requires an account. Sign up to unlock more learning content.",
+            )
+        if not include_content:
+            self._send_json(200, {"allowed": True, "lessonId": lesson_id})
+            return
+        try:
+            with open(LESSON_CONTENT_PATH, encoding="utf-8") as handle:
+                lessons = json.load(handle)["lessons"]
+            lesson = next((item for item in lessons if item["id"] == lesson_id), None)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            self.log_error("Course content could not be loaded for lesson %s", lesson_id)
+            raise AccountError(500, "lesson_content_unavailable", "Course content could not be loaded.") from None
+        if lesson is None:
+            self.log_error("Course content is missing for configured lesson %s", lesson_id)
+            raise AccountError(500, "lesson_content_unavailable", "Course content could not be loaded.")
+        self._send_json(200, {"lesson": lesson})
 
     def _get_user_data(self):
         user = self._signed_in_user()
@@ -207,15 +323,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return data
 
     def _session_token(self) -> str | None:
+        return self._cookie_value(SESSION_COOKIE)
+
+    def _guest_token(self) -> str | None:
+        return self._cookie_value(GUEST_SESSION_COOKIE)
+
+    def _cookie_value(self, cookie_name: str) -> str | None:
         for part in (self.headers.get("Cookie") or "").split(";"):
             name, _, value = part.strip().partition("=")
-            if name == SESSION_COOKIE and value:
+            if name == cookie_name and value:
                 return value
         return None
+
+    def _valid_guest_token(self) -> str:
+        token = self._guest_token()
+        if not token or self.store.guest_session_limits(token) is None:
+            raise AccountError(401, "guest_session_required", "Refresh the page to start a guest session.")
+        return token
 
     def _session_cookie(self, token: str) -> str:
         max_age = self.store.session_days * 24 * 60 * 60
         return f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}"
+
+    def _guest_session_cookie(self, token: str) -> str:
+        max_age = GUEST_SESSION_DAYS * 24 * 60 * 60
+        return f"{GUEST_SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}"
 
     def _send_json(self, status: int, payload, headers=()):
         body = b"" if payload is None else json.dumps(payload).encode("utf-8")

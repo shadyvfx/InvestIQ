@@ -10,6 +10,7 @@ import { toast, announce } from './components/notifications.js';
 import { advanceMarket } from './services/marketDataService.js';
 import { loadAppData } from './services/session.js';
 import { logoMark } from './components/icons.js';
+import { showAccountGate } from './components/accountGate.js';
 
 import dashboard from './pages/dashboard.js';
 import learn from './pages/learn.js';
@@ -75,11 +76,26 @@ async function boot() {
     onCommand: async (name) => {
       if (name === 'advance-day') {
         try {
-          await advanceMarket(1);
+          const clock = await advanceMarket(1);
           announce(`Advanced to simulated day ${getState().market.day}.`);
           toast({ title: `Simulated day ${getState().market.day}`, body: 'The simulated market moved forward one trading day.', tone: 'info' });
+          if (clock.guestLimitReached) {
+            await showAccountGate({
+              title: 'Guest simulation limit reached',
+              message: "You've reached the guest simulation limit. Create an account to continue using TradeLab.",
+              returnTo: window.location.hash.slice(1) || '/',
+            });
+          }
         } catch (error) {
-          toast({ title: 'The simulated market could not advance', body: error.message, tone: 'error' });
+          if (error.code === 'guest_simulation_limit') {
+            await showAccountGate({
+              title: 'Guest simulation limit reached',
+              message: "You've reached the guest simulation limit. Create an account to continue using TradeLab.",
+              returnTo: window.location.hash.slice(1) || '/',
+            });
+          } else {
+            toast({ title: 'The simulated market could not advance', body: error.message, tone: 'error' });
+          }
         }
       }
     },

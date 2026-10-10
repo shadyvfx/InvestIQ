@@ -11,12 +11,21 @@ import { isMock } from '../config.js';
 import { api, ApiError, simulateLatency, localId } from './apiClient.js';
 import { getState, updateSlice } from '../state.js';
 import { validateJournalEntry } from '../core/journal.js';
+import { reserveGuestJournalEntry } from './accountService.js';
 
 export class ValidationError extends Error {
   constructor(errors) {
     super('Some fields need attention.');
     this.name = 'ValidationError';
     this.errors = errors;
+  }
+}
+
+export class GuestLimitError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'GuestLimitError';
+    this.code = 'guest_journal_limit';
   }
 }
 
@@ -80,6 +89,12 @@ function knownSymbols() {
 export async function createEntry(input, { transactionId } = {}) {
   const result = validateJournalEntry(input, { knownSymbols: knownSymbols() });
   if (!result.ok) throw new ValidationError(result.errors);
+  try {
+    await reserveGuestJournalEntry();
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'guest_journal_limit') throw new GuestLimitError(error.message);
+    throw error;
+  }
   const { entry } = await adapter.create({ ...result.value, ...(transactionId ? { transactionId } : {}) });
   updateSlice('journal', (journal) => ({ ...journal, entries: [entry, ...journal.entries] }), 'journal/created');
   return entry;

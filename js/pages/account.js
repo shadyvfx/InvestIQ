@@ -248,7 +248,7 @@ function page(state) {
 const unavailableStatus = () => ({
   tone: 'warn',
   title: "The account server isn't running",
-  text: html`Sign-up and sign-in need the TradeLab server, which keeps the user database. Stop the server you started TradeLab with, run <code>${SERVER_COMMAND}</code> in the TradeLab folder, then check again.`,
+  text: html`Sign-up and sign-in need the Flask server, which also connects the AI tutor to this website. Run <code>${SERVER_COMMAND}</code> in the TradeLab folder and open <code>http://127.0.0.1:5000</code>, then check again.`,
   retry: true,
 });
 
@@ -499,6 +499,11 @@ export default {
           ui.status = { tone: 'success', title: 'Signed in', text: `Welcome back, ${label}. Your saved progress is loaded.` };
         }
         paint({ keepFocus: false });
+        const returnTo = ctx.query.returnTo;
+        if (typeof returnTo === 'string' && returnTo.startsWith('/') && !returnTo.startsWith('//')) {
+          ctx.navigate(returnTo);
+          return;
+        }
         focusStatus(root);
       } catch (error) {
         ui.busy = false;

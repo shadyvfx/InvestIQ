@@ -439,7 +439,12 @@ class ServerTests(unittest.TestCase):
                 raw = response.read()
                 return response.status, json.loads(raw) if raw else None
         except urllib.error.HTTPError as error:
-            return error.code, json.loads(error.read() or b"null")
+            raw = error.read()
+            try:
+                body = json.loads(raw) if raw else None
+            except json.JSONDecodeError:
+                body = None
+            return error.code, body
 
     def test_email_check_endpoint(self):
         opener = self.client()
@@ -470,6 +475,44 @@ class ServerTests(unittest.TestCase):
         # After signing out, the same browser can't read or write the account's progress.
         self.assertEqual(self.call(ana, "DELETE", "/api/session")[0], 204)
         self.assertEqual(self.call(ana, "GET", "/api/me/data")[0], 401)
+
+    def test_guest_limits_and_lesson_content_are_enforced_by_the_standard_server(self):
+        guest = self.client()
+        session_status, session = self.call(guest, "GET", "/api/session")
+        self.assertEqual(session_status, 200)
+        self.assertEqual(session["guestLimits"]["simulationDaysRemaining"], 21)
+        self.assertEqual(self.call(guest, "GET", "/api/lessons/what-is-a-stock")[0], 200)
+        self.assertEqual(self.call(guest, "GET", "/api/lessons/candlestick-anatomy")[0], 403)
+        self.assertEqual(self.call(guest, "GET", "/api/lessons/candlestick-anatomy/access")[0], 403)
+        self.assertEqual(self.call(guest, "GET", "/server/lesson_content.json")[0], 404)
+
+        for _ in range(4):
+            self.assertEqual(self.call(guest, "POST", "/api/guest/simulation/advance", {"days": 5})[0], 200)
+        status, final_week = self.call(guest, "POST", "/api/guest/simulation/advance", {"days": 5})
+        self.assertEqual((status, final_week["grantedDays"], final_week["limits"]["simulationDay"]), (200, 1, 36))
+        self.assertEqual(self.call(guest, "POST", "/api/guest/simulation/advance", {"days": 1})[0], 403)
+
+        for remaining in (1, 0):
+            status, result = self.call(guest, "POST", "/api/guest/journal/entries", {})
+            self.assertEqual((status, result["limits"]["journalEntriesRemaining"]), (200, remaining))
+        self.assertEqual(self.call(guest, "POST", "/api/guest/journal/entries", {})[0], 403)
+
+    def test_standard_server_does_not_apply_guest_quotas_to_signed_in_accounts(self):
+        account = self.client()
+        status, _user = self.call(
+            account,
+            "POST",
+            "/api/users",
+            {"username": "full_access", "email": "full_access@mail.org", "password": "Tr@deLab1"},
+        )
+        self.assertEqual(status, 201)
+        simulation = self.call(account, "POST", "/api/guest/simulation/advance", {"days": 5})
+        journal = self.call(account, "POST", "/api/guest/journal/entries", {})
+        lesson = self.call(account, "GET", "/api/lessons/candlestick-anatomy")
+        self.assertEqual(simulation, (200, {"authenticated": True}))
+        self.assertEqual(journal, (200, {"authenticated": True}))
+        self.assertEqual(lesson[0], 200)
+        self.assertEqual(lesson[1]["lesson"]["id"], "candlestick-anatomy")
 
 
 if __name__ == "__main__":

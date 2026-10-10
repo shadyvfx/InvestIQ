@@ -1,32 +1,26 @@
 # TradeLab frontend
 
-TradeLab teaches beginners how the stock market works: interactive lessons, paper trading with virtual money, a portfolio view, a trading journal and a tutor. This repository is the frontend plus two small local servers: an **account server** for sign-up and sign-in (saved in a SQLite database), and a **Flask tutor backend** that answers with a local Qwen model. Every price is simulated and every dollar is virtual.
+TradeLab teaches beginners how the stock market works: interactive lessons, paper trading with virtual money, a portfolio view, a trading journal and a tutor. The local Flask server serves the frontend, account API backed by SQLite, and tutor API for a local Qwen model. Every price is simulated and every dollar is virtual.
 
-Built with HTML, CSS and vanilla JavaScript (ES modules). Chart.js is the only third-party frontend code, and it is vendored. The account server uses only Python's standard library; the tutor backend's Python dependencies are listed in `requirements.txt`.
+Built with HTML, CSS and vanilla JavaScript (ES modules). Chart.js is the only third-party frontend code, and it is vendored. The standalone account server uses only Python's standard library; Flask and its tutor-backend dependencies are listed in `requirements.txt`.
 
 ## Run it locally
 
-ES modules don't load from `file://`, so serve the folder over HTTP. For the app itself, neither of these servers needs any packages:
+ES modules don't load from `file://`, so serve the folder over HTTP.
 
-```bash
-# Python 3.8 or newer: the whole app, including sign-up and sign-in
-python3 scripts/dev_server.py    # http://127.0.0.1:5173
+For the website, SQLite accounts, and local tutor API on the same origin, activate the existing environment, install the Python requirements, and run Flask:
 
-# Node 18 or newer: the app without accounts (frontend work only)
-npm run dev                      # http://127.0.0.1:5173
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m flask --app backend.app run --host 127.0.0.1 --port 5000
 ```
 
-With either one, turn off the local tutor in `js/config.js` first, so the tutor uses its prewritten answers:
+Open http://127.0.0.1:5000. To use the AI tutor, also start `llama-server` with your local Qwen GGUF model on port 8080; see [docs/integration.md](docs/integration.md) for the command. The account database is `tradelab.db` in this folder, created on first account request. Set `TRADELAB_DB` to use a different database file.
 
-```js
-tutorApiEnabled: false,
-```
+To run only the frontend with prewritten tutor answers and no server-backed accounts, use `npm run dev` (Node 18+). The standard-library Python server remains available with `python scripts/dev_server.py` when you want accounts but not the Qwen tutor.
 
-For a working local Qwen tutor, use the Flask setup in [docs/integration.md](docs/integration.md); it serves the frontend and the tutor API from the same origin. Flask doesn't have the account routes yet, so the Qwen tutor and sign-in don't work in the same browser window yet.
-
-`npm run server` starts the Python account server too. Use another port with `python3 scripts/dev_server.py 8000` or `npm run dev -- 8000`. Both servers send the right MIME type for `.js` files (some Windows setups otherwise break module loading) and disable caching so edits show up on refresh. On Windows, type `python` instead of `python3`.
-
-The Python server saves accounts in `tradelab.db` in this folder, and creates the file on first run. When you use the Node server, the Account page says that accounts need the Python server.
+Keep `dataSource: 'mock'` in `js/config.js`; `tutorApiEnabled: true` is the default and enables the Flask/Qwen tutor. Set it to `false` for prewritten tutor answers.
 
 Run the tests. The Node tests and the account server tests need nothing installed; the tutor backend tests need the packages in `requirements.txt`:
 
@@ -40,6 +34,17 @@ python3 -m unittest discover -s tests -v   # account server, tutor backend and k
 The first visit creates a demo account with $10,000 in virtual cash, five example trades and two example journal entries, all labeled **Example**, sitting on simulated day 15. That way the dashboard, portfolio and journal show what they do right away. To start clean, use **Start with an empty account** on the Overview banner or **Settings > Reset simulated account**.
 
 Prices only change when you press **Advance 1 day** or **Advance 1 week**. That keeps the simulation honest (nothing pretends to be live) and lets you see how a decision plays out.
+
+## Guest access
+
+Guests can explore the app, with server-enforced limits:
+
+- **Simulation:** 21 simulated trading-day advances (one virtual month), starting at the existing demo clock's day 15 and ending at day 36. An advance-week request at the boundary is shortened to the remaining days.
+- **Courses:** the three beginner courses *What Is a Stock?*, *How Prices Move*, and *Market vs. Limit Orders*. Other lesson bodies are served only by Flask after it verifies the account session.
+- **Tutor:** requires a signed-in account, for both local Qwen and preview mode.
+- **Journal:** two new entries per guest session. Preloaded `Example` entries are sample data and do not consume those creation slots. Deleting an entry does not restore a slot.
+
+The limits are kept in SQLite against a random, HttpOnly guest-session cookie that expires after 365 days; progress and journal text remain in this browser's local storage until an account takes them over. Clearing site cookies creates a new anonymous identity and resets its guest allowance, so these controls prevent ordinary refreshes and client-side counter edits but are not a substitute for verified accounts or abuse controls on a public deployment.
 
 ## Pages
 
@@ -96,6 +101,7 @@ tradelab/
     integration.md           Flask tutor setup and future API contracts
     mobile.md                What carries over to a mobile app and what doesn't
   server/accounts.py         Sign-up rules, password hashing, the SQLite user database, saved progress
+  server/lesson_content.json Full course content delivered by Flask after access checks
   server/email_check.py      Email checker: provider typos, reserved domains, DNS MX lookup
   scripts/                   Zero-dependency servers: dev_server.py (app + accounts), dev-server.mjs (app only)
   tests/
@@ -373,8 +379,10 @@ See [docs/integration.md](docs/integration.md) for the remaining endpoint list a
 ## Known limitations
 
 - **Guest data is browser-only.** Signed out, progress lives in this browser's `localStorage`, which is not a secure or permanent store; clearing site data resets it. Signed in, it's saved to your account on the server.
+- **Guest limits use a server cookie.** The SQLite database stores only a hash of the random guest token and its simulation/journal counters; it does not store guest journal text or simulated trades. The cookie lasts 365 days, but clearing it starts a new anonymous session and allowance.
+- **Course content is protected at delivery.** The three guest lessons are public frontend content; other lesson bodies live in `server/lesson_content.json` and are returned only to a signed-in account by Flask. Catalog titles and summaries remain public.
 - **Accounts are a local prototype.** No confirmation emails, password reset or rate limiting on sign-in. The email checker confirms the domain receives mail, not the mailbox. The Python server listens only on 127.0.0.1 over plain HTTP; a public deployment needs HTTPS and a production server.
-- **Two servers for now.** The Flask tutor backend serves the frontend and the local tutor only, and sign-in runs on the account server, so the Qwen tutor and sign-in don't work in the same browser window until the account routes move into Flask.
+- **One server for the full local experience.** Flask serves the frontend, local tutor API, and SQLite-backed sign-in and account progress. The standard-library account server is still available if you do not need the tutor.
 - **Market orders only.** Limit and stop orders, fractional shares, short selling, fees, dividends and a bid/ask spread are not simulated yet. The order lesson says so.
 - **Other backend services.** The market, trading, progress and journal API endpoints are not implemented; those features run on mock data, saved to your account when you're signed in.
 - **Tutor preview.** With the local tutor off, the tutor answers a fixed set of prewritten topics; anything else gets an honest "I don't have an answer for that yet".

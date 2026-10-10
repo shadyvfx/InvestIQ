@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,8 @@ from unittest.mock import Mock, patch
 import requests
 
 from backend.app import (
+    GUEST_COURSE_IDS,
+    LESSON_IDS,
     LLAMA_URL,
     MAX_COMPLETION_TOKENS,
     MAX_HISTORY_CHARS,
@@ -19,6 +22,8 @@ from backend.app import (
     retrieval_query_for_history,
 )
 from backend.knowledge_base import create_source_record, rebuild_index, retrieve_relevant, save_source_record
+from server.accounts import AccountStore
+from server.email_check import EmailCheck
 
 
 RETRIEVED_PASSAGE = {
@@ -40,7 +45,18 @@ RETRIEVED_PASSAGE = {
 class TutorApiTests(unittest.TestCase):
     def setUp(self):
         app.config.update(TESTING=True)
+        self.previous_store = app.config.get("ACCOUNT_STORE")
+        self.folder = tempfile.TemporaryDirectory()
+        self.store = AccountStore(
+            os.path.join(self.folder.name, "tutor-tests.db"),
+            iterations=1_000,
+            email_checker=lambda email: EmailCheck("ok", "ok", None, email.rpartition("@")[2]),
+        )
+        self.store.migrate()
+        user = self.store.create_user("tutor_test_user", "tutor@example.com", "Tr@deLab1")
+        app.config["ACCOUNT_STORE"] = self.store
         self.client = app.test_client()
+        self.client.set_cookie("tradelab_session", self.store.create_session(user["id"]))
         self.retrieve_patch = patch("backend.app.retrieve_relevant", return_value=[RETRIEVED_PASSAGE])
         self.retrieve_mock = self.retrieve_patch.start()
         self.addCleanup(self.retrieve_patch.stop)
@@ -49,8 +65,28 @@ class TutorApiTests(unittest.TestCase):
             "choices": [{"message": {"content": "A limit order sets a price boundary."}}]
         }
 
+    def tearDown(self):
+        if self.previous_store is None:
+            app.config.pop("ACCOUNT_STORE", None)
+        else:
+            app.config["ACCOUNT_STORE"] = self.previous_store
+        self.folder.cleanup()
+
     def post_chat(self, body):
         return self.client.post("/api/tutor/chat", json=body)
+
+    @patch("backend.app.requests.post")
+    def test_guest_tutor_request_is_rejected_before_retrieval_or_inference(self, post_model):
+        guest = app.test_client()
+        response = guest.post("/api/tutor/chat", json={"messages": [{"role": "user", "content": "Explain risk."}]})
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response.get_json()["error"]["message"],
+            "You'll need to sign in to access TraderLab Tutor.",
+        )
+        post_model.assert_not_called()
+        self.retrieve_mock.assert_not_called()
 
     @patch("backend.app.requests.post")
     def test_valid_request_forwards_level_and_latest_twelve_messages(self, post_model):
@@ -597,6 +633,174 @@ class TutorApiTests(unittest.TestCase):
         for path in ("/ai_system_prompt.txt", "/backend/app.py", "/.venv/pyvenv.cfg"):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 404)
+
+
+class FlaskAccountApiTests(unittest.TestCase):
+    def setUp(self):
+        app.config.update(TESTING=True)
+        self.previous_store = app.config.get("ACCOUNT_STORE")
+        self.folder = tempfile.TemporaryDirectory()
+        self.store = AccountStore(
+            os.path.join(self.folder.name, "tradelab.db"),
+            iterations=1_000,
+            email_checker=lambda email: EmailCheck("ok", "ok", None, email.rpartition("@")[2]),
+        )
+        self.store.migrate()
+        app.config["ACCOUNT_STORE"] = self.store
+        self.client = app.test_client()
+
+    def tearDown(self):
+        if self.previous_store is None:
+            app.config.pop("ACCOUNT_STORE", None)
+        else:
+            app.config["ACCOUNT_STORE"] = self.previous_store
+        self.folder.cleanup()
+
+    def create_account(self, client, username):
+        return client.post(
+            "/api/users",
+            json={"username": username, "email": f"{username}@example.com", "password": "Tr@deLab1"},
+        )
+
+    def test_signup_session_progress_and_signout_share_the_flask_origin(self):
+        created = self.create_account(self.client, "flask_user")
+
+        self.assertEqual(created.status_code, 201)
+        self.assertTrue(created.headers["Set-Cookie"].startswith("tradelab_session="))
+        self.assertIn("HttpOnly", created.headers["Set-Cookie"])
+        user = created.get_json()["user"]
+        self.assertEqual(self.client.get("/api/session").get_json()["user"]["id"], user["id"])
+        self.assertEqual(self.client.get("/api/me/data").get_json(), {"data": None, "updatedAt": None})
+
+        progress = {"schemaVersion": 1, "state": {"learning": {"lessons": {"intro": {"completedAt": 1}}}}}
+        saved = self.client.put("/api/me/data", json={"data": progress})
+        self.assertEqual(saved.status_code, 200)
+        self.assertTrue(saved.get_json()["updatedAt"])
+        self.assertEqual(self.client.get("/api/me/data").get_json()["data"], progress)
+
+        signed_out = self.client.delete("/api/session")
+        self.assertEqual(signed_out.status_code, 204)
+        guest_session = self.client.get("/api/session").get_json()
+        self.assertIsNone(guest_session["user"])
+        self.assertEqual(guest_session["guestLimits"]["simulationDaysRemaining"], 21)
+        self.assertEqual(self.client.get("/api/me/data").status_code, 401)
+
+    def test_flask_accounts_keep_saved_progress_separate_and_reject_foreign_origins(self):
+        ana = app.test_client()
+        ben = app.test_client()
+        self.create_account(ana, "ana_flask")
+        self.create_account(ben, "ben_flask")
+        progress = {"schemaVersion": 1, "state": {"account": "ana"}}
+        self.assertEqual(ana.put("/api/me/data", json={"data": progress}).status_code, 200)
+        self.assertIsNone(ben.get("/api/me/data").get_json()["data"])
+
+        rejected = ana.post(
+            "/api/session",
+            json={"login": "ana_flask", "password": "Tr@deLab1"},
+            headers={"Origin": "https://attacker.example"},
+        )
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(rejected.get_json()["error"]["code"], "forbidden_origin")
+
+    def test_guest_simulation_quota_is_server_owned_and_survives_refresh(self):
+        guest = app.test_client()
+        initial = guest.get("/api/session").get_json()["guestLimits"]
+        self.assertEqual(initial["simulationDay"], 15)
+        self.assertEqual(initial["simulationDaysRemaining"], 21)
+
+        for _ in range(4):
+            response = guest.post("/api/guest/simulation/advance", json={"days": 5})
+            self.assertEqual(response.status_code, 200)
+        final_week = guest.post("/api/guest/simulation/advance", json={"days": 5})
+        self.assertEqual(final_week.status_code, 200)
+        self.assertEqual(final_week.get_json()["grantedDays"], 1)
+        self.assertTrue(final_week.get_json()["limitReached"])
+        self.assertEqual(final_week.get_json()["limits"]["simulationDay"], 36)
+        self.assertEqual(final_week.get_json()["limits"]["simulationDaysRemaining"], 0)
+
+        denied = guest.post("/api/guest/simulation/advance", json={"days": 1})
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied.get_json()["error"]["code"], "guest_simulation_limit")
+        refreshed = guest.get("/api/session").get_json()["guestLimits"]
+        self.assertEqual(refreshed["simulationDaysUsed"], 21)
+        self.assertEqual(refreshed["simulationDaysRemaining"], 0)
+
+    def test_guest_simulation_rejects_invalid_or_oversized_direct_requests(self):
+        guest = app.test_client()
+        guest.get("/api/session")
+        for days in (0, 2, 30, True):
+            with self.subTest(days=days):
+                response = guest.post("/api/guest/simulation/advance", json={"days": days})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json()["error"]["code"], "invalid_request")
+
+    def test_guest_journal_limit_is_cumulative_and_guest_sessions_are_isolated(self):
+        first_guest = app.test_client()
+        second_guest = app.test_client()
+        first_guest.get("/api/session")
+        second_guest.get("/api/session")
+
+        for remaining in (1, 0):
+            response = first_guest.post("/api/guest/journal/entries", json={})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()["limits"]["journalEntriesRemaining"], remaining)
+        denied = first_guest.post("/api/guest/journal/entries", json={})
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied.get_json()["error"]["code"], "guest_journal_limit")
+        self.assertEqual(first_guest.get("/api/session").get_json()["guestLimits"]["journalEntriesRemaining"], 0)
+
+        other_guest = second_guest.post("/api/guest/journal/entries", json={})
+        self.assertEqual(other_guest.status_code, 200)
+        self.assertEqual(other_guest.get_json()["limits"]["journalEntriesRemaining"], 1)
+
+    def test_course_access_is_restricted_for_guests_and_open_for_accounts(self):
+        content_path = Path(__file__).resolve().parents[1] / "server" / "lesson_content.json"
+        lesson_data = json.loads(content_path.read_text(encoding="utf-8"))["lessons"]
+        self.assertEqual({lesson["id"] for lesson in lesson_data}, LESSON_IDS)
+        self.assertEqual(len(GUEST_COURSE_IDS), 3)
+        self.assertTrue(all(lesson["difficulty"] == "beginner" for lesson in lesson_data if lesson["id"] in GUEST_COURSE_IDS))
+
+        guest = app.test_client()
+        for lesson_id in ("what-is-a-stock", "how-prices-move", "market-vs-limit-orders"):
+            with self.subTest(lesson_id=lesson_id):
+                response = guest.get(f"/api/lessons/{lesson_id}")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_json()["lesson"]["id"], lesson_id)
+
+        self.assertEqual(guest.get("/api/lessons/what-is-a-stock/access").status_code, 200)
+        self.assertEqual(guest.get("/server/lesson_content.json").status_code, 404)
+        catalog_response = self.client.get("/js/data/mockLessons.js")
+        public_catalog = catalog_response.get_data(as_text=True)
+        catalog_response.close()
+        self.assertNotIn("A candlestick summarizes trading over one period", public_catalog)
+        private_content = self.client.get("/server/lesson_content.json")
+        self.addCleanup(private_content.close)
+        self.assertEqual(private_content.status_code, 404)
+        locked = guest.get("/api/lessons/candlestick-anatomy/access")
+        self.assertEqual(locked.status_code, 403)
+        self.assertEqual(locked.get_json()["error"]["code"], "course_account_required")
+        locked_content = guest.get("/api/lessons/candlestick-anatomy")
+        self.assertEqual(locked_content.status_code, 403)
+        self.assertEqual(locked_content.get_json()["error"]["code"], "course_account_required")
+        self.assertEqual(guest.get("/api/lessons/not-a-course/access").status_code, 404)
+
+        self.create_account(self.client, "course_user")
+        for lesson_id in ("candlestick-anatomy", "rsi-momentum", "position-sizing"):
+            with self.subTest(authenticated_lesson=lesson_id):
+                response = self.client.get(f"/api/lessons/{lesson_id}")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_json()["lesson"]["id"], lesson_id)
+
+    def test_authenticated_accounts_bypass_guest_simulation_and_journal_quotas(self):
+        self.create_account(self.client, "limits_user")
+
+        simulation = self.client.post("/api/guest/simulation/advance", json={"days": 5})
+        journal = self.client.post("/api/guest/journal/entries", json={})
+
+        self.assertEqual(simulation.status_code, 200)
+        self.assertTrue(simulation.get_json()["authenticated"])
+        self.assertEqual(journal.status_code, 200)
+        self.assertTrue(journal.get_json()["authenticated"])
 
 
 if __name__ == "__main__":

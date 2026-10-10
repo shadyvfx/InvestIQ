@@ -19,6 +19,7 @@ import { executeMarketOrder } from '../core/orders.js';
 import { equityCurve, positionQuantity } from '../core/portfolio.js';
 import { latestTradingDay, localTodayISO } from '../core/calendar.js';
 import { closeOnDay, dateOfDay, refreshQuotes } from './marketDataService.js';
+import { syncGuestSimulationClock } from './accountService.js';
 
 export class OrderError extends Error {
   constructor(errors) {
@@ -120,6 +121,7 @@ export async function loadAccount() {
  * @throws {OrderError} when the order breaks a rule (not enough cash or shares)
  */
 export async function placeOrder(order) {
+  await syncGuestSimulationClock();
   const { transaction } = await adapter.placeOrder({ ...order, type: 'market' });
   setState(
     (state) => ({

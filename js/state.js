@@ -85,6 +85,7 @@ function freshRuntime() {
     // so it isn't saved here: GET /api/session restores it on every start.
     user: null,
     userStatus: 'checking', // 'checking' | 'signed-in' | 'signed-out' | 'unavailable'
+    guestLimits: null, // server-owned guest quotas from GET /api/session
     // Saving the signed-in account's progress to the server.
     sync: { status: 'idle', savedAt: null }, // status: 'idle' | 'saving' | 'saved' | 'error'
     tutorPending: false,

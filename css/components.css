@@ -1190,6 +1190,14 @@ button.sim-pill[aria-expanded='true'] {
   font-size: var(--fs-13);
 }
 
+.simbar__limit {
+  flex: 1 0 100%;
+}
+
+.simbar__limit .cluster {
+  margin-top: var(--s-3);
+}
+
 .simbar__actions {
   display: flex;
   flex-wrap: wrap;

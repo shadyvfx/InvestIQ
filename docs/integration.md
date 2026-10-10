@@ -2,7 +2,7 @@
 
 The frontend keeps market, account, lesson-progress, and journal features on their existing mock implementations. Flask serves the frontend and provides the tutor endpoint, which forwards chat requests to a locally hosted llama.cpp model.
 
-Two local servers implement parts of the contract today: Flask (`backend/app.py`) runs the tutor, and the account server (`python3 scripts/dev_server.py`, with `server/accounts.py`) implements sign-up, sign-in, the email checker and saving each account's progress, with a SQLite user database; see [Accounts](#accounts). They don't share a server yet, so the Qwen tutor and sign-in don't work in the same browser window until the account routes move into Flask (import `AccountStore` from `server/accounts.py`). The other endpoints below remain future integration contracts; do not set the global `dataSource` to `'api'` until those endpoints exist.
+Flask (`backend/app.py`) serves the frontend, the tutor endpoint, and the account endpoints backed by `server/accounts.py` and a SQLite database. The account server (`python scripts/dev_server.py`) remains available as a standard-library-only option when the Qwen tutor is not needed. The other endpoints below remain future integration contracts; do not set the global `dataSource` to `'api'` until those endpoints exist.
 
 1. [Switching the tutor between local Qwen and mock responses](#1-switching-the-tutor-between-local-qwen-and-mock-responses)
 2. [Serving the frontend from Flask](#2-serving-the-frontend-from-flask)
@@ -44,10 +44,11 @@ implemented.
 | Journal entries | Saved progress | Backend |
 | Tutor replies (`tutorApiEnabled: true`) | Flask, then local llama.cpp / Qwen | Same |
 | Tutor replies (`tutorApiEnabled: false`) | Prewritten answers (`js/data/mockTutorResponses.js`) | Same |
-| Lesson catalog and quiz content | Bundled (`js/data/mockLessons.js`) | Still bundled; add `GET /api/lessons` later if you want it server-side |
+| Lesson catalog metadata and three guest lessons | Bundled (`js/data/mockLessons.js`) | Same |
+| Account-required lesson bodies | Flask (`GET /api/lessons/:lessonId`) after session authorization | Same |
 | Preferences, tutor conversation, notifications | Saved progress | localStorage |
 | Sidebar state | localStorage (`tradelab:v1:device`) | localStorage |
-| User accounts and sign-in | Account server + SQLite (`tradelab.db`) | Same; always on the server |
+| User accounts and sign-in | Flask account API + SQLite (`tradelab.db`) | Same; always on the server |
 
 In mock mode, **saved progress** belongs to whoever is using TradeLab. Signed in, it is the account's document in the `user_data` table, loaded with `GET /api/me/data` and saved with `PUT /api/me/data` (see [Accounts](#accounts)). Signed out, it is a guest copy in this browser's localStorage (`tradelab:v1`). Signing in or out swaps one for the other, so one person's progress never shows for another.
 
@@ -89,7 +90,7 @@ From the project root, in separate PowerShell windows:
 # Activate the existing virtual environment
 .\.venv\Scripts\Activate.ps1
 
-# Install the declared backend dependencies
+# Install the declared Flask backend dependencies
 python -m pip install -r requirements.txt
 ```
 
@@ -104,7 +105,7 @@ actual location; do not download or rebuild it):
 llama-server -m "C:\path\to\Qwen3-8B-Q4_K_M.gguf" --host 127.0.0.1 --port 8080 -c 8192
 ```
 
-In another PowerShell window, from the project root:
+In another PowerShell window, from the project root, run Flask. It serves the frontend and provides the tutor and account APIs from one origin:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -112,8 +113,13 @@ python -m flask --app backend.app run --host 127.0.0.1 --port 5000
 ```
 
 Open `http://127.0.0.1:5000/`. Flask serves the HTML, stylesheets, JavaScript
-modules, and assets from the same origin as the API. The browser calls only
-`/api/tutor/chat`; Flask alone calls llama.cpp.
+modules, assets, SQLite-backed account routes (`/api/users`, `/api/session`,
+`/api/email-check`, and `/api/me/data`), guest-quota routes under
+`/api/guest/*`, protected lesson bodies at `/api/lessons/<id>`, and
+`/api/tutor/chat`. The browser calls these APIs on the same origin; Flask
+alone calls llama.cpp. Accounts and guest quota counters are stored in
+`tradelab.db` in the project folder by default. Set `TRADELAB_DB` before
+starting Flask to use another database file.
 
 Test the endpoint from PowerShell:
 
@@ -129,7 +135,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/tutor/chat" `
 
 Use Qwen with `tutorApiEnabled: true` (the default), or set it to `false` in
 `js/config.js` for prewritten mock tutor answers. Keep `dataSource: 'mock'`
-for both choices so other application features remain unaffected.
+for both choices so other application features remain unaffected. If the model
+server is stopped, sign-in and SQLite-backed account progress continue to work;
+only AI tutor replies need llama.cpp.
 
 Run both test suites with:
 
@@ -246,7 +254,20 @@ Performance `equity` is the account value at each day's close: cash plus every h
 | `POST /progress/:lessonId/quiz` `{ answers: { [questionId]: optionIndex } }` | Finishing the knowledge check | `{ grade: Grade, record: ProgressRecord }` |
 | `DELETE /progress/:lessonId` | `resetLesson()` (not used by the interface yet) | `204` |
 
-The lesson catalog, including correct answers and explanations, ships with the frontend, so the per-question Check feedback runs in the browser. The server's grade is the one that counts: grade with the rules in `js/core/progress.js` (pass at two thirds; the first pass marks every section done and sets `completedAt`). To move the catalog to the server, add `GET /api/lessons` returning the `LESSONS` structure and load it at startup instead of the import in `progressService.js`.
+The public catalog metadata and three guest-available beginner lessons ship with the frontend. Full content, quizzes, answers and explanations for account-required lessons are stored outside the static-file tree in `server/lesson_content.json`; `GET /api/lessons/<id>` returns a lesson only after checking the signed-in session. The Flask route rejects guest requests before reading private lesson content. Quiz feedback and progress are still calculated in the browser using `js/core/progress.js` (pass at two thirds; the first pass marks every section done and sets `completedAt`).
+
+### Guest limits
+
+Flask keeps guest allowances in a `guest_sessions` SQLite table, keyed by a
+hash of a random HttpOnly, SameSite=Lax cookie. The guest starts at simulated
+day 15 and can advance 21 weekday-based trading days (through day 36); an
+advance-week request can be shortened at the limit. Guest journal slots count
+new entry creations, and deletion does not refund a slot. The preloaded
+`Example` journal rows are sample data and do not consume those slots. Guest
+progress and journal text remain localStorage data; only quota counters are
+stored server-side. Clearing the cookie creates a fresh anonymous session,
+which is an inherent limitation of anonymous identity rather than a secure
+anti-abuse identity.
 
 ### Journal (`js/services/journalService.js`)
 

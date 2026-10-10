@@ -24,8 +24,9 @@ const mock = {
     return { record: completeSection(record, sectionId) };
   },
 
-  async submitQuiz(lessonId, answers) {
-    const lesson = getLesson(lessonId);
+  async submitQuiz(lessonId, answers, lessonContent) {
+    const lesson = lessonContent || getLesson(lessonId);
+    if (!lesson?.quiz?.length) throw new Error('That lesson content is unavailable.');
     const grade = gradeQuiz(lesson.quiz, answers);
     const record = recordQuizAttempt(getState().learning.lessons[lessonId], lesson, grade);
     return { grade, record };
@@ -81,9 +82,9 @@ export async function markSectionComplete(lessonId, sectionId) {
  * Grades a knowledge check. Passing (two thirds or better) completes the lesson.
  * @returns {Promise<{grade: {score:number,total:number,passed:boolean,results:Array}, record: object, completedNow: boolean}>}
  */
-export async function submitQuiz(lessonId, answers) {
+export async function submitQuiz(lessonId, answers, lessonContent) {
   const wasCompleted = Boolean(getState().learning.lessons[lessonId]?.completedAt);
-  const { grade, record } = await adapter.submitQuiz(lessonId, answers);
+  const { grade, record } = await adapter.submitQuiz(lessonId, answers, lessonContent);
   commitRecord(lessonId, record);
   return { grade, record, completedNow: grade.passed && !wasCompleted };
 }
